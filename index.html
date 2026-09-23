@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <title>PaperJump Mobile</title>
+</head>
+<body>
+  <header><h1>PaperJump Mobile</h1><span id="status">准备启动</span></header>
+  <main>
+    <section class="viewer">
+      <video id="camera" playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <p id="hint">点击“开始扫描”并允许摄像头权限。把带四个 ArUco 角标的纸完整放进画面。</p>
+    </section>
+    <section class="controls">
+      <button id="start">开始扫描</button>
+      <button id="stop" class="secondary" disabled>停止</button>
+      <label>导入 pages.json <input id="pages-file" type="file" accept="application/json,.json"></label>
+      <label>导入 custom_nodes.json <input id="nodes-file" type="file" accept="application/json,.json"></label>
+    </section>
+    <section class="panel">
+      <h2 id="page-title">当前页面节点</h2>
+      <div id="nodes"></div>
+    </section>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/js-aruco2@2.0.0/src/cv.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/js-aruco2@2.0.0/src/aruco.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
