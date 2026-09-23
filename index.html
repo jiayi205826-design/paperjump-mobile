@@ -3,31 +3,50 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#111827">
+  <meta name="theme-color" content="#fff8fa">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="icons/paperjump-icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/paperjump-icon.png">
   <link rel="stylesheet" href="styles.css">
-  <title>PaperJump Mobile</title>
+  <title>Paper Portal</title>
 </head>
 <body>
-  <header><h1>PaperJump Mobile</h1><span id="status">准备启动</span></header>
+  <header>
+    <div class="brand">
+      <img src="icons/paperjump-icon.png" alt="Paper Portal">
+      <div><h1>Paper Portal</h1><p>让纸张，通往你的数字世界</p></div>
+    </div>
+    <span id="status">准备就绪</span>
+  </header>
   <main>
     <section class="viewer">
       <video id="camera" playsinline muted></video>
       <canvas id="overlay"></canvas>
-      <p id="hint">点击“开始扫描”并允许摄像头权限。把带四个 ArUco 角标的纸完整放进画面。</p>
+      <div class="camera-badge"><i></i> 实时识别</div>
+      <p id="hint">轻触下方按钮开始扫描，将带有四个角标的纸张完整放入画面。</p>
     </section>
-    <section class="controls">
-      <button id="start">开始扫描</button>
+    <section class="actions">
+      <button id="start">◉&ensp;开始扫描</button>
       <button id="stop" class="secondary" disabled>停止</button>
-      <label>导入 pages.json <input id="pages-file" type="file" accept="application/json,.json"></label>
-      <label>导入 custom_nodes.json <input id="nodes-file" type="file" accept="application/json,.json"></label>
     </section>
     <section class="panel">
-      <h2 id="page-title">当前页面节点</h2>
+      <div class="panel-heading">
+        <div><small>识别结果</small><h2 id="page-title">当前页面节点</h2></div>
+        <span class="page-dot"></span>
+      </div>
       <div id="nodes"></div>
     </section>
+    <details class="settings">
+      <summary>数据设置</summary>
+      <p>需要同步电脑上的页面或节点时，再从这里导入。</p>
+      <div class="import-grid">
+        <label>导入页面数据 <input id="pages-file" type="file" accept="application/json,.json"></label>
+        <label>导入节点数据 <input id="nodes-file" type="file" accept="application/json,.json"></label>
+      </div>
+    </details>
   </main>
+  <footer>Paper Portal · 触碰纸面，抵达记忆</footer>
   <script src="https://cdn.jsdelivr.net/npm/js-aruco2@2.0.0/src/cv.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/js-aruco2@2.0.0/src/aruco.js"></script>
   <script type="module" src="app.js"></script>

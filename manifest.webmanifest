@@ -1,13 +1,13 @@
 {
-  "name": "PaperJump Mobile",
-  "short_name": "PaperJump",
-  "description": "用手机扫描纸面节点并跳转到数字资源",
+  "name": "Paper Portal",
+  "short_name": "Paper Portal",
+  "description": "触碰纸面，抵达你的数字世界",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#0b1020",
-  "theme_color": "#111827",
+  "background_color": "#fffaf9",
+  "theme_color": "#fff8fa",
   "icons": [
-    {"src":"icons/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+    {"src":"icons/paperjump-icon.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
   ]
 }

@@ -1,5 +1,3 @@
-import {FilesetResolver, HandLandmarker} from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/vision_bundle.mjs';
-
 const $ = selector => document.querySelector(selector);
 const video = $('#camera');
 const canvas = $('#overlay');
@@ -136,7 +134,7 @@ async function frame() {
   const markers=detector.detect(ctx.getImageData(0,0,canvas.width,canvas.height));
   const located=locatePage(markers);
   let fingertip, active;
-  const result=hands.detectForVideo(video,performance.now());
+  const result=hands ? hands.detectForVideo(video,performance.now()) : {landmarks:[]};
   if(result.landmarks?.[0]){
     const tip=result.landmarks[0][8];fingertip={x:tip.x*canvas.width,y:tip.y*canvas.height};
     if(located){const transform=homography(located.quad),point=transform&&mapPoint(transform,fingertip);active=point&&(nodesByPage[located.pageId]||[]).find(node=>inside(point,regionPolygon(node.region)));}
@@ -149,15 +147,38 @@ async function frame() {
 
 async function start() {
   try {
-    setStatus('正在加载识别组件');
-    if(!window.AR)throw new Error('ArUco 组件加载失败，请检查网络');
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('当前浏览器不支持摄像头访问');
+    setStatus('请允许使用摄像头');
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});
+    video.srcObject=stream;
+    await video.play();
+    running=true;
+    $('#start').disabled=true;
+    $('#stop').disabled=false;
+    $('#hint').hidden=true;
+
+    setStatus('相机已开启，正在加载识别');
+    if(!window.AR)throw new Error('ArUco 识别库加载失败，请检查网络');
     window.AR.DICTIONARIES.DICT_4X4_50={nBits:16,tau:4,codeList:DICT_4X4_50};
     detector=new window.AR.Detector({dictionaryName:'DICT_4X4_50',maxHammingDistance:1});
+    frame();
+    const {FilesetResolver, HandLandmarker}=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/vision_bundle.mjs');
     const vision=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/wasm');
     hands=await HandLandmarker.createFromOptions(vision,{baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:'GPU'},runningMode:'VIDEO',numHands:1});
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});
-    video.srcObject=stream;await video.play();running=true;$('#start').disabled=true;$('#stop').disabled=false;$('#hint').hidden=true;frame();
-  } catch(error) { setStatus(`无法启动：${error.message}`); }
+    setStatus('识别已就绪');
+  } catch(error) {
+    if (stream?.active) {
+      setStatus(`相机可用，识别组件未加载：${error.message}`);
+    } else {
+      stream?.getTracks().forEach(track=>track.stop());
+      stream=null;
+      video.srcObject=null;
+      running=false;
+      $('#start').disabled=false;
+      $('#stop').disabled=true;
+      setStatus(`无法启动：${error.message}`);
+    }
+  }
 }
 
 function stop() {running=false;stream?.getTracks().forEach(track=>track.stop());hands?.close();video.srcObject=null;$('#start').disabled=false;$('#stop').disabled=true;setStatus('已停止');}
