@@ -1,5 +1,5 @@
-const CACHE='paper-jump-v7';
-const SHELL=['./','index.html','styles.css?v=7','app.js?v=7','manifest.webmanifest','pages.json','custom_nodes.json','icons/paperjump-icon.png?v=7'];
+const CACHE='paper-jump-v8';
+const SHELL=['./','index.html','styles.css?v=8','app.js?v=8','manifest.webmanifest','pages.json','custom_nodes.json','icons/paperjump-icon.png?v=8'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',event=>{

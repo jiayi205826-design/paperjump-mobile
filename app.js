@@ -17,6 +17,7 @@ let currentLocated = null;
 let currentTransform = null;
 let pendingNode = null;
 let pickContext = null;
+let editorContext = null;
 let stablePageId = null;
 let stableQuad = null;
 let missedPageFrames = 0;
@@ -166,22 +167,36 @@ function closeEditor() {
 
 function beginNodeEditor() {
   if (!currentLocated) return setStatus('请先扫描并识别一张纸');
+  editorContext = currentTransform ? {pageId: currentLocated.pageId, transform: [...currentTransform]} : null;
   $('#node-name').value = '';
   $('#node-url').value = '';
+  $('#editor-help').textContent = '可粘贴纯链接，也可以直接粘贴小红书或 B 站的整段分享文字。';
+  $('#editor-help').classList.remove('error');
   $('#node-editor').hidden = false;
   setTimeout(() => $('#node-url').focus(), 50);
 }
 
 function beginPositionPick() {
-  const url = $('#node-url').value.trim();
-  if (!/^https?:\/\//i.test(url)) return setStatus('请粘贴以 http:// 或 https:// 开头的链接');
+  const pasted = $('#node-url').value.trim();
+  const matchedUrl = pasted.match(/https?:\/\/[^\s]+/i)?.[0];
+  const url = matchedUrl?.replace(/[，。；、）》】）\]}>]+$/g, '') || '';
+  if (!url) {
+    $('#editor-help').textContent = '没有找到有效链接，请粘贴包含 http:// 或 https:// 的内容。';
+    $('#editor-help').classList.add('error');
+    return;
+  }
+  if (!editorContext) {
+    $('#editor-help').textContent = '刚才的页面位置没有锁定，请关闭弹窗，重新识别纸张后再试。';
+    $('#editor-help').classList.add('error');
+    return;
+  }
   let name = $('#node-name').value.trim();
   if (!name) {
     try { name = new URL(url).hostname.replace(/^www\./, ''); } catch { name = '新节点'; }
   }
-  if (!currentLocated || !currentTransform) return setStatus('页面识别已丢失，请重新对准纸张');
   pendingNode = {name, url};
-  pickContext = {pageId: currentLocated.pageId, transform: [...currentTransform]};
+  pickContext = editorContext;
+  editorContext = null;
   closeEditor();
   $('.viewer').classList.add('picking');
   $('#hint').hidden = false;
