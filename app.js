@@ -13,6 +13,9 @@ let lastOpen = 0;
 let pages = {};
 let nodesByPage = {};
 let currentPageId = null;
+let currentLocated = null;
+let currentTransform = null;
+let pendingNode = null;
 
 function setStatus(message) { $('#status').textContent = message; }
 function normalizeText(value) { return String(value || '').replace(/\s+/g, ' ').trim(); }
@@ -125,6 +128,65 @@ function renderNodeList(pageId) {
   }
 }
 
+function saveNodes() {
+  localStorage.setItem('paperjump-nodes', JSON.stringify(nodesByPage));
+}
+
+function closeEditor() {
+  $('#node-editor').hidden = true;
+}
+
+function beginNodeEditor() {
+  if (!currentLocated) return setStatus('请先扫描并识别一张纸');
+  $('#node-name').value = '';
+  $('#node-url').value = '';
+  $('#node-editor').hidden = false;
+  setTimeout(() => $('#node-url').focus(), 50);
+}
+
+function beginPositionPick() {
+  const url = $('#node-url').value.trim();
+  if (!/^https?:\/\//i.test(url)) return setStatus('请粘贴以 http:// 或 https:// 开头的链接');
+  let name = $('#node-name').value.trim();
+  if (!name) {
+    try { name = new URL(url).hostname.replace(/^www\./, ''); } catch { name = '新节点'; }
+  }
+  pendingNode = {name, url};
+  closeEditor();
+  $('.viewer').classList.add('picking');
+  $('#hint').hidden = false;
+  $('#hint').textContent = '现在请在纸面画面上点一下，选择这个链接对应的位置。';
+  setStatus('请选择纸面位置');
+}
+
+function placePendingNode(event) {
+  if (!pendingNode || !currentLocated || !currentTransform) return;
+  const box = canvas.getBoundingClientRect();
+  const cameraPoint = {
+    x: (event.clientX - box.left) * canvas.width / box.width,
+    y: (event.clientY - box.top) * canvas.height / box.height,
+  };
+  const point = mapPoint(currentTransform, cameraPoint);
+  if (!point || point.x < 0 || point.x > 1 || point.y < 0 || point.y > 1) {
+    return setStatus('请点在识别出的纸张范围内');
+  }
+  const region = [
+    Math.max(0, point.x - .07), Math.max(0, point.y - .05),
+    Math.min(1, point.x + .07), Math.min(1, point.y + .05),
+  ];
+  const pageId = currentLocated.pageId;
+  nodesByPage[pageId] ||= [];
+  nodesByPage[pageId].push({...pendingNode, region, target_type:'url'});
+  saveNodes();
+  const name = pendingNode.name;
+  pendingNode = null;
+  $('.viewer').classList.remove('picking');
+  $('#hint').hidden = true;
+  currentPageId = undefined;
+  renderNodeList(pageId);
+  setStatus(`已保存节点：${name}`);
+}
+
 async function frame() {
   if(!running)return;
   requestAnimationFrame(frame);
@@ -133,16 +195,19 @@ async function frame() {
   canvas.width=video.videoWidth;canvas.height=video.videoHeight;ctx.drawImage(video,0,0,canvas.width,canvas.height);
   const markers=detector.detect(ctx.getImageData(0,0,canvas.width,canvas.height));
   const located=locatePage(markers);
+  currentLocated=located;
+  currentTransform=located?homography(located.quad):null;
+  $('#add-node').disabled=!located;
   let fingertip, active;
   const result=hands ? hands.detectForVideo(video,performance.now()) : {landmarks:[]};
   if(result.landmarks?.[0]){
     const tip=result.landmarks[0][8];fingertip={x:tip.x*canvas.width,y:tip.y*canvas.height};
-    if(located){const transform=homography(located.quad),point=transform&&mapPoint(transform,fingertip);active=point&&(nodesByPage[located.pageId]||[]).find(node=>inside(point,regionPolygon(node.region)));}
+    if(located){const point=currentTransform&&mapPoint(currentTransform,fingertip);active=point&&(nodesByPage[located.pageId]||[]).find(node=>inside(point,regionPolygon(node.region)));}
   }
   ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(video,0,0,canvas.width,canvas.height);draw(markers,located,fingertip,active);
   renderNodeList(located?.pageId ?? null);
-  setStatus(active?`${active.name}：准备打开`:located?`已识别 Page ${located.pageId}`:`找到 ${markers.length} 个角标`);
-  if(active&&performance.now()-lastOpen>1800){lastOpen=performance.now();if(confirm(`打开“${active.name}”？`))window.open(active.url,'_blank','noopener');}
+  if(!pendingNode)setStatus(active?`${active.name}：准备打开`:located?`已识别 Page ${located.pageId}`:`找到 ${markers.length} 个角标`);
+  if(active&&!pendingNode&&performance.now()-lastOpen>1800){lastOpen=performance.now();if(confirm(`打开“${active.name}”？`))window.open(active.url,'_blank','noopener');}
 }
 
 async function start() {
@@ -181,11 +246,15 @@ async function start() {
   }
 }
 
-function stop() {running=false;stream?.getTracks().forEach(track=>track.stop());hands?.close();video.srcObject=null;$('#start').disabled=false;$('#stop').disabled=true;setStatus('已停止');}
+function stop() {running=false;stream?.getTracks().forEach(track=>track.stop());hands?.close();video.srcObject=null;currentLocated=null;currentTransform=null;$('#add-node').disabled=true;$('#start').disabled=false;$('#stop').disabled=true;setStatus('已停止');}
 async function readJson(file) { return JSON.parse(await file.text()); }
 
 $('#start').onclick=start;
 $('#stop').onclick=stop;
+$('#add-node').onclick=beginNodeEditor;
+$('#close-editor').onclick=closeEditor;
+$('#pick-position').onclick=beginPositionPick;
+canvas.addEventListener('pointerup', placePendingNode);
 $('#pages-file').onchange=async event=>{try{pages=normalizePages(await readJson(event.target.files[0]));localStorage.setItem('paperjump-pages',JSON.stringify(pages));setStatus(`已导入 ${Object.keys(pages).length} 个 ArUco 页面`);}catch{setStatus('pages.json 无效');}};
 $('#nodes-file').onchange=async event=>{try{nodesByPage=normalizeNodes(await readJson(event.target.files[0]));localStorage.setItem('paperjump-nodes',JSON.stringify(nodesByPage));currentPageId=undefined;renderNodeList(null);setStatus('节点数据已导入');}catch{setStatus('custom_nodes.json 无效');}};
 

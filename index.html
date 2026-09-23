@@ -33,9 +33,18 @@
     <section class="panel">
       <div class="panel-heading">
         <div><small>识别结果</small><h2 id="page-title">当前页面节点</h2></div>
-        <span class="page-dot"></span>
+        <button id="add-node" class="mini" disabled>＋ 新增节点</button>
       </div>
       <div id="nodes"></div>
+    </section>
+    <section id="node-editor" class="node-editor" hidden>
+      <div class="editor-card">
+        <div class="editor-title"><h2>新增链接节点</h2><button id="close-editor" class="close" aria-label="关闭">×</button></div>
+        <label>节点名称<input id="node-name" type="text" placeholder="例如：这条小红书笔记"></label>
+        <label>粘贴链接<input id="node-url" type="url" inputmode="url" placeholder="https://..."></label>
+        <p id="editor-help">填写后，点击“下一步”并在纸面画面上点一下节点位置。</p>
+        <button id="pick-position">下一步：选择纸面位置</button>
+      </div>
     </section>
     <details class="settings">
       <summary>数据设置</summary>
