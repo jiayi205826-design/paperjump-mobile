@@ -17,6 +17,9 @@ let currentLocated = null;
 let currentTransform = null;
 let pendingNode = null;
 let pickContext = null;
+let stablePageId = null;
+let stableQuad = null;
+let missedPageFrames = 0;
 
 function setStatus(message) { $('#status').textContent = message; }
 function normalizeText(value) { return String(value || '').replace(/\s+/g, ' ').trim(); }
@@ -86,6 +89,30 @@ function locatePage(markers) {
     const found = markerIds.map(id => markers.find(marker => marker.id === id));
     if (found.every(Boolean)) return {pageId, quad:found.map(center)};
   }
+  return null;
+}
+
+function stabilizePage(located) {
+  if (located) {
+    if (stablePageId !== located.pageId || !stableQuad) {
+      stablePageId = located.pageId;
+      stableQuad = located.quad.map(point => ({...point}));
+    } else {
+      const alpha = .22;
+      stableQuad = stableQuad.map((point, index) => ({
+        x: point.x * (1 - alpha) + located.quad[index].x * alpha,
+        y: point.y * (1 - alpha) + located.quad[index].y * alpha,
+      }));
+    }
+    missedPageFrames = 0;
+    return {pageId: stablePageId, quad: stableQuad};
+  }
+  if (stableQuad && missedPageFrames < 8) {
+    missedPageFrames += 1;
+    return {pageId: stablePageId, quad: stableQuad};
+  }
+  stablePageId = null;
+  stableQuad = null;
   return null;
 }
 
@@ -194,11 +221,12 @@ function placePendingNode(event) {
 async function frame() {
   if(!running)return;
   requestAnimationFrame(frame);
+  if(pendingNode)return;
   if(video.readyState<2||video.currentTime===lastVideoTime)return;
   lastVideoTime=video.currentTime;
   canvas.width=video.videoWidth;canvas.height=video.videoHeight;ctx.drawImage(video,0,0,canvas.width,canvas.height);
   const markers=detector.detect(ctx.getImageData(0,0,canvas.width,canvas.height));
-  const located=locatePage(markers);
+  const located=stabilizePage(locatePage(markers));
   currentLocated=located;
   currentTransform=located?homography(located.quad):null;
   $('#add-node').disabled=!located;
@@ -250,7 +278,7 @@ async function start() {
   }
 }
 
-function stop() {running=false;stream?.getTracks().forEach(track=>track.stop());hands?.close();video.srcObject=null;currentLocated=null;currentTransform=null;$('#add-node').disabled=true;$('#start').disabled=false;$('#stop').disabled=true;setStatus('已停止');}
+function stop() {running=false;stream?.getTracks().forEach(track=>track.stop());hands?.close();video.srcObject=null;currentLocated=null;currentTransform=null;stablePageId=null;stableQuad=null;missedPageFrames=0;$('#add-node').disabled=true;$('#start').disabled=false;$('#stop').disabled=true;setStatus('已停止');}
 async function readJson(file) { return JSON.parse(await file.text()); }
 
 $('#start').onclick=start;
