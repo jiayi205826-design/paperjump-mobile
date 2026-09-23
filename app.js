@@ -16,6 +16,7 @@ let currentPageId = null;
 let currentLocated = null;
 let currentTransform = null;
 let pendingNode = null;
+let pickContext = null;
 
 function setStatus(message) { $('#status').textContent = message; }
 function normalizeText(value) { return String(value || '').replace(/\s+/g, ' ').trim(); }
@@ -151,7 +152,9 @@ function beginPositionPick() {
   if (!name) {
     try { name = new URL(url).hostname.replace(/^www\./, ''); } catch { name = '新节点'; }
   }
+  if (!currentLocated || !currentTransform) return setStatus('页面识别已丢失，请重新对准纸张');
   pendingNode = {name, url};
+  pickContext = {pageId: currentLocated.pageId, transform: [...currentTransform]};
   closeEditor();
   $('.viewer').classList.add('picking');
   $('#hint').hidden = false;
@@ -160,13 +163,13 @@ function beginPositionPick() {
 }
 
 function placePendingNode(event) {
-  if (!pendingNode || !currentLocated || !currentTransform) return;
+  if (!pendingNode || !pickContext) return;
   const box = canvas.getBoundingClientRect();
   const cameraPoint = {
     x: (event.clientX - box.left) * canvas.width / box.width,
     y: (event.clientY - box.top) * canvas.height / box.height,
   };
-  const point = mapPoint(currentTransform, cameraPoint);
+  const point = mapPoint(pickContext.transform, cameraPoint);
   if (!point || point.x < 0 || point.x > 1 || point.y < 0 || point.y > 1) {
     return setStatus('请点在识别出的纸张范围内');
   }
@@ -174,12 +177,13 @@ function placePendingNode(event) {
     Math.max(0, point.x - .07), Math.max(0, point.y - .05),
     Math.min(1, point.x + .07), Math.min(1, point.y + .05),
   ];
-  const pageId = currentLocated.pageId;
+  const pageId = pickContext.pageId;
   nodesByPage[pageId] ||= [];
   nodesByPage[pageId].push({...pendingNode, region, target_type:'url'});
   saveNodes();
   const name = pendingNode.name;
   pendingNode = null;
+  pickContext = null;
   $('.viewer').classList.remove('picking');
   $('#hint').hidden = true;
   currentPageId = undefined;
