@@ -1,4 +1,4 @@
-import {MobileNaturalRecognizer} from './natural-recognizer.js?v=2';
+import {MobileNaturalRecognizer,loadOpenCv} from './natural-recognizer.js?v=3';
 
 const $ = selector => document.querySelector(selector);
 const video = $('#camera');
@@ -309,11 +309,19 @@ async function pickNaturalCorner(event) {
 }
 
 async function autoNaturalScan() {
+  const scanButton=$('#natural-scan');
   if(!running)return setStatus('请先启动相机');
   if(!naturalRecognizer)return setStatus('Natural 特征尚未加载');
+  scanButton.disabled=true;
+  scanButton.textContent='正在加载识别组件…';
+  $('#hint').hidden=false;
+  $('#hint').textContent='首次使用需要加载普通纸识别组件，请稍候。';
   naturalSnapshot=ctx.getImageData(0,0,canvas.width,canvas.height);
   setStatus('正在自动寻找普通纸…');
   try{
+    await loadOpenCv();
+    scanButton.textContent='正在检测纸张…';
+    $('#hint').textContent='正在寻找纸张边缘…';
     const detection=await naturalRecognizer.detectPaper(naturalSnapshot);
     if(!detection){
       setStatus('自动检测未找到完整纸张，已进入手动四角兜底');
@@ -321,6 +329,8 @@ async function autoNaturalScan() {
       return;
     }
     naturalPoints=detection.corners;
+    scanButton.textContent='正在匹配页面…';
+    $('#hint').textContent='已找到纸张，正在识别页面…';
     setStatus(`已自动检测纸张（${detection.method}），正在匹配页面…`);
     const result=await naturalRecognizer.recognize(naturalSnapshot,naturalPoints);
     if(result.known){
@@ -333,6 +343,9 @@ async function autoNaturalScan() {
       setStatus(`PAPER_DETECTED_UNKNOWN · 最佳 Page ${result.best_candidate} · 置信度 ${result.confidence.toFixed(2)} · 差值 ${result.candidate_margin.toFixed(2)}`);
     }
   }catch(error){setStatus(`Natural 自动识别失败：${error.message}`);}
+  scanButton.disabled=!running;
+  scanButton.textContent='自动识别普通纸';
+  $('#hint').hidden=true;
 }
 
 async function start() {

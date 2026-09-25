@@ -19,17 +19,25 @@ let cvPromise;
 export function loadOpenCv() {
   if (cvPromise) return cvPromise;
   cvPromise = new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cvPromise = undefined;
+      reject(new Error('识别组件加载超时，请刷新页面后重试'));
+    }, 20000);
+    const finish = (callback, value) => {
+      window.clearTimeout(timeout);
+      callback(value);
+    };
     const ready = async () => {
       try {
         let runtime = window.cv;
         if (runtime instanceof Promise) runtime = await runtime;
-        if (runtime?.Mat) return resolve(runtime);
-        runtime.onRuntimeInitialized = () => resolve(runtime);
-      } catch (error) { reject(error); }
+        if (runtime?.Mat) return finish(resolve, runtime);
+        runtime.onRuntimeInitialized = () => finish(resolve, runtime);
+      } catch (error) { finish(reject, error); }
     };
     if (window.cv) return ready();
     const script = document.createElement('script');
-    script.src = 'https://docs.opencv.org/4.x/opencv.js';
+    script.src = './vendor/opencv.js?v=1';
     script.async = true;
     script.onload = ready;
     script.onerror = () => reject(new Error('OpenCV.js 加载失败，请检查网络'));
