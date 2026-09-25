@@ -372,6 +372,18 @@ const savedNodes=localStorage.getItem('paperjump-nodes');
 const savedNatural=localStorage.getItem('paperjump-natural');
 pages=savedPages?JSON.parse(savedPages):normalizePages(await fetch('pages.json').then(response=>response.json()));
 nodesByPage=savedNodes?JSON.parse(savedNodes):normalizeNodes(await fetch('custom_nodes.json').then(response=>response.json()));
-if(savedNatural){try{naturalRecognizer=new MobileNaturalRecognizer(JSON.parse(savedNatural));}catch{localStorage.removeItem('paperjump-natural');}}
+if(savedNatural){
+  try{naturalRecognizer=new MobileNaturalRecognizer(JSON.parse(savedNatural));}
+  catch{localStorage.removeItem('paperjump-natural');}
+}
+if(!naturalRecognizer){
+  try{
+    const bundledNatural=await fetch('natural_pages_mobile.json?v=1').then(response=>{
+      if(!response.ok)throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    });
+    naturalRecognizer=new MobileNaturalRecognizer(bundledNatural);
+  }catch(error){console.warn('Bundled Natural features unavailable:',error);}
+}
 renderNodeList(null);
 if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
