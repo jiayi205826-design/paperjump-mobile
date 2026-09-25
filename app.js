@@ -1,3 +1,5 @@
+import {MobileNaturalRecognizer} from './natural-recognizer.js?v=1';
+
 const $ = selector => document.querySelector(selector);
 const video = $('#camera');
 const canvas = $('#overlay');
@@ -21,6 +23,11 @@ let editorContext = null;
 let stablePageId = null;
 let stableQuad = null;
 let missedPageFrames = 0;
+let pageMode = 'aruco';
+let naturalRecognizer = null;
+let naturalPicking = false;
+let naturalPoints = [];
+let naturalSnapshot = null;
 
 function setStatus(message) { $('#status').textContent = message; }
 function normalizeText(value) { return String(value || '').replace(/\s+/g, ' ').trim(); }
@@ -236,10 +243,11 @@ function placePendingNode(event) {
 async function frame() {
   if(!running)return;
   requestAnimationFrame(frame);
-  if(pendingNode)return;
+  if(pendingNode||naturalPicking)return;
   if(video.readyState<2||video.currentTime===lastVideoTime)return;
   lastVideoTime=video.currentTime;
   canvas.width=video.videoWidth;canvas.height=video.videoHeight;ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  if(pageMode==='natural')return;
   const markers=detector.detect(ctx.getImageData(0,0,canvas.width,canvas.height));
   const located=stabilizePage(locatePage(markers));
   currentLocated=located;
@@ -257,6 +265,49 @@ async function frame() {
   if(active&&!pendingNode&&performance.now()-lastOpen>1800){lastOpen=performance.now();if(confirm(`打开“${active.name}”？`))window.open(active.url,'_blank','noopener');}
 }
 
+function canvasPoint(event) {
+  const box=canvas.getBoundingClientRect();
+  return {x:(event.clientX-box.left)*canvas.width/box.width,y:(event.clientY-box.top)*canvas.height/box.height};
+}
+
+function beginNaturalScan() {
+  if(!running)return setStatus('请先启动相机');
+  if(!naturalRecognizer)return setStatus('请先在数据设置中导入 Natural 私人特征包');
+  naturalSnapshot=ctx.getImageData(0,0,canvas.width,canvas.height);
+  naturalPoints=[];
+  naturalPicking=true;
+  $('#hint').hidden=false;
+  $('#hint').textContent='画面已冻结：请依次点击纸张左上、右上、右下、左下。';
+  $('.viewer').classList.add('picking');
+  setStatus('请点击左上角（1/4）');
+}
+
+async function pickNaturalCorner(event) {
+  if(!naturalPicking)return;
+  const point=canvasPoint(event);
+  naturalPoints.push(point);
+  ctx.putImageData(naturalSnapshot,0,0);
+  ctx.strokeStyle='#facc15';ctx.fillStyle='#facc15';ctx.lineWidth=3;ctx.beginPath();
+  naturalPoints.forEach((p,index)=>index?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.stroke();
+  naturalPoints.forEach((p,index)=>{ctx.beginPath();ctx.arc(p.x,p.y,9,0,Math.PI*2);ctx.fill();ctx.fillStyle='#3b2028';ctx.font='bold 13px sans-serif';ctx.fillText(String(index+1),p.x+12,p.y-8);ctx.fillStyle='#facc15';});
+  const names=['右上角','右下角','左下角'];
+  if(naturalPoints.length<4){setStatus(`请点击${names[naturalPoints.length-1]}（${naturalPoints.length+1}/4）`);return;}
+  setStatus('正在进行 Natural 页面匹配…');
+  try{
+    const result=await naturalRecognizer.recognize(naturalSnapshot,naturalPoints);
+    naturalPicking=false;$('.viewer').classList.remove('picking');$('#hint').hidden=true;
+    if(result.known){
+      currentLocated={pageId:String(result.page_id),quad:naturalPoints.map(p=>({...p}))};
+      currentTransform=homography(currentLocated.quad);$('#add-node').disabled=false;
+      currentPageId=undefined;renderNodeList(currentLocated.pageId);
+      setStatus(`已识别 Page ${result.page_id} · ${result.orientation}° · 置信度 ${result.confidence.toFixed(2)}`);
+    }else{
+      currentLocated=null;currentTransform=null;$('#add-node').disabled=true;currentPageId=undefined;renderNodeList(null);
+      setStatus(`PAPER_DETECTED_UNKNOWN · 最佳 Page ${result.best_candidate} · 置信度 ${result.confidence.toFixed(2)} · 差值 ${result.candidate_margin.toFixed(2)}`);
+    }
+  }catch(error){naturalPicking=false;$('.viewer').classList.remove('picking');setStatus(`Natural 识别失败：${error.message}`);}
+}
+
 async function start() {
   try {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('当前浏览器不支持摄像头访问');
@@ -267,6 +318,7 @@ async function start() {
     running=true;
     $('#start').disabled=true;
     $('#stop').disabled=false;
+    $('#natural-scan').disabled=false;
     $('#hint').hidden=true;
 
     setStatus('相机已开启，正在加载识别');
@@ -293,7 +345,7 @@ async function start() {
   }
 }
 
-function stop() {running=false;stream?.getTracks().forEach(track=>track.stop());hands?.close();video.srcObject=null;currentLocated=null;currentTransform=null;stablePageId=null;stableQuad=null;missedPageFrames=0;$('#add-node').disabled=true;$('#start').disabled=false;$('#stop').disabled=true;setStatus('已停止');}
+function stop() {running=false;stream?.getTracks().forEach(track=>track.stop());hands?.close();video.srcObject=null;currentLocated=null;currentTransform=null;stablePageId=null;stableQuad=null;missedPageFrames=0;$('#add-node').disabled=true;$('#natural-scan').disabled=true;$('#start').disabled=false;$('#stop').disabled=true;setStatus('已停止');}
 async function readJson(file) { return JSON.parse(await file.text()); }
 
 $('#start').onclick=start;
@@ -301,13 +353,25 @@ $('#stop').onclick=stop;
 $('#add-node').onclick=beginNodeEditor;
 $('#close-editor').onclick=closeEditor;
 $('#pick-position').onclick=beginPositionPick;
-canvas.addEventListener('pointerup', placePendingNode);
+canvas.addEventListener('pointerup',event=>naturalPicking?pickNaturalCorner(event):placePendingNode(event));
+$('#natural-scan').onclick=beginNaturalScan;
+$('#page-mode').onchange=event=>{
+  pageMode=event.target.value;
+  $('#natural-scan').hidden=pageMode!=='natural';
+  $('#natural-scan').disabled=!running;
+  currentLocated=null;currentTransform=null;currentPageId=undefined;renderNodeList(null);$('#add-node').disabled=true;
+  setStatus(pageMode==='natural'?'Natural 模式：请冻结并确认四角':'ArUco 模式');
+};
 $('#pages-file').onchange=async event=>{try{pages=normalizePages(await readJson(event.target.files[0]));localStorage.setItem('paperjump-pages',JSON.stringify(pages));setStatus(`已导入 ${Object.keys(pages).length} 个 ArUco 页面`);}catch{setStatus('pages.json 无效');}};
 $('#nodes-file').onchange=async event=>{try{nodesByPage=normalizeNodes(await readJson(event.target.files[0]));localStorage.setItem('paperjump-nodes',JSON.stringify(nodesByPage));currentPageId=undefined;renderNodeList(null);setStatus('节点数据已导入');}catch{setStatus('custom_nodes.json 无效');}};
 
+$('#natural-file').onchange=async event=>{try{const bundle=await readJson(event.target.files[0]);naturalRecognizer=new MobileNaturalRecognizer(bundle);localStorage.setItem('paperjump-natural',JSON.stringify(bundle));setStatus(`已导入 ${bundle.pages.length} 个 Natural 页面特征`);}catch(error){setStatus(`Natural 特征包无效：${error.message}`);}};
+
 const savedPages=localStorage.getItem('paperjump-pages');
 const savedNodes=localStorage.getItem('paperjump-nodes');
+const savedNatural=localStorage.getItem('paperjump-natural');
 pages=savedPages?JSON.parse(savedPages):normalizePages(await fetch('pages.json').then(response=>response.json()));
 nodesByPage=savedNodes?JSON.parse(savedNodes):normalizeNodes(await fetch('custom_nodes.json').then(response=>response.json()));
+if(savedNatural){try{naturalRecognizer=new MobileNaturalRecognizer(JSON.parse(savedNatural));}catch{localStorage.removeItem('paperjump-natural');}}
 renderNodeList(null);
 if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
