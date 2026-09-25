@@ -101,6 +101,72 @@ export class MobileNaturalRecognizer {
     if (!this.pages.length) throw new Error('Natural 特征包中没有页面');
   }
 
+  async detectPaper(imageData) {
+    const cv=await loadOpenCv();
+    const source=cv.matFromImageData(imageData),gray=new cv.Mat(),blurred=new cv.Mat();
+    const masks=[];
+    try{
+      cv.cvtColor(source,gray,cv.COLOR_RGBA2GRAY);
+      cv.GaussianBlur(gray,blurred,new cv.Size(5,5),0);
+      const bright=new cv.Mat();
+      cv.threshold(blurred,bright,0,255,cv.THRESH_BINARY+cv.THRESH_OTSU);
+      const kernel=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(5,5));
+      cv.morphologyEx(bright,bright,cv.MORPH_OPEN,kernel);
+      cv.morphologyEx(bright,bright,cv.MORPH_CLOSE,kernel);
+      kernel.delete();masks.push({method:'OTSU',mat:bright});
+      const edges=new cv.Mat();
+      cv.Canny(blurred,edges,50,150);
+      const edgeKernel=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(3,3));
+      cv.morphologyEx(edges,edges,cv.MORPH_CLOSE,edgeKernel);edgeKernel.delete();
+      masks.push({method:'CANNY',mat:edges});
+      const candidates=[];
+      for(const route of masks)this.collectQuads(cv,route.mat,route.method,source.cols,source.rows,candidates);
+      candidates.sort((a,b)=>b.score-a.score);
+      return candidates[0]||null;
+    }finally{source.delete();gray.delete();blurred.delete();masks.forEach(item=>item.mat.delete());}
+  }
+
+  collectQuads(cv,mask,method,width,height,candidates){
+    const contours=new cv.MatVector(),hierarchy=new cv.Mat();
+    try{
+      cv.findContours(mask,contours,hierarchy,cv.RETR_EXTERNAL,cv.CHAIN_APPROX_SIMPLE);
+      const imageArea=width*height;
+      for(let index=0;index<contours.size();index+=1){
+        const contour=contours.get(index),approx=new cv.Mat(),hull=new cv.Mat();
+        try{
+          const area=Math.abs(cv.contourArea(contour));
+          const areaRatio=area/imageArea;
+          if(areaRatio<.18)continue;
+          const perimeter=cv.arcLength(contour,true);
+          cv.approxPolyDP(contour,approx,.02*perimeter,true);
+          if(approx.rows!==4||!cv.isContourConvex(approx))continue;
+          const points=[];
+          for(let row=0;row<4;row+=1){const p=approx.intPtr(row,0);points.push({x:p[0],y:p[1]});}
+          const ordered=this.orderCorners(points);
+          const border=ordered.some(p=>p.x<=3||p.y<=3||p.x>=width-4||p.y>=height-4);
+          if(border&&areaRatio>.9)continue;
+          const rect=cv.minAreaRect(contour),rectArea=Math.max(1,rect.size.width*rect.size.height);
+          const rectangularity=Math.min(1,area/rectArea);
+          cv.convexHull(contour,hull);
+          const hullArea=Math.max(1,Math.abs(cv.contourArea(hull)));
+          const solidity=Math.min(1,area/hullArea);
+          const score=.5*Math.min(1,areaRatio/.65)+.27*rectangularity+.23*solidity-(border?.12:0);
+          candidates.push({corners:ordered,method,area_ratio:areaRatio,rectangularity,solidity,score});
+        }finally{contour.delete();approx.delete();hull.delete();}
+      }
+    }finally{contours.delete();hierarchy.delete();}
+  }
+
+  orderCorners(points){
+    const sums=points.map(p=>p.x+p.y),diffs=points.map(p=>p.x-p.y);
+    return [
+      points[sums.indexOf(Math.min(...sums))],
+      points[diffs.indexOf(Math.max(...diffs))],
+      points[sums.indexOf(Math.max(...sums))],
+      points[diffs.indexOf(Math.min(...diffs))],
+    ].map(point=>({...point}));
+  }
+
   async recognize(imageData, corners) {
     const cv = await loadOpenCv();
     const source = cv.matFromImageData(imageData);

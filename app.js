@@ -1,4 +1,4 @@
-import {MobileNaturalRecognizer} from './natural-recognizer.js?v=1';
+import {MobileNaturalRecognizer} from './natural-recognizer.js?v=2';
 
 const $ = selector => document.querySelector(selector);
 const video = $('#camera');
@@ -308,6 +308,33 @@ async function pickNaturalCorner(event) {
   }catch(error){naturalPicking=false;$('.viewer').classList.remove('picking');setStatus(`Natural 识别失败：${error.message}`);}
 }
 
+async function autoNaturalScan() {
+  if(!running)return setStatus('请先启动相机');
+  if(!naturalRecognizer)return setStatus('Natural 特征尚未加载');
+  naturalSnapshot=ctx.getImageData(0,0,canvas.width,canvas.height);
+  setStatus('正在自动寻找普通纸…');
+  try{
+    const detection=await naturalRecognizer.detectPaper(naturalSnapshot);
+    if(!detection){
+      setStatus('自动检测未找到完整纸张，已进入手动四角兜底');
+      beginNaturalScan();
+      return;
+    }
+    naturalPoints=detection.corners;
+    setStatus(`已自动检测纸张（${detection.method}），正在匹配页面…`);
+    const result=await naturalRecognizer.recognize(naturalSnapshot,naturalPoints);
+    if(result.known){
+      currentLocated={pageId:String(result.page_id),quad:naturalPoints.map(p=>({...p}))};
+      currentTransform=homography(currentLocated.quad);$('#add-node').disabled=false;
+      currentPageId=undefined;renderNodeList(currentLocated.pageId);
+      setStatus(`已识别 Page ${result.page_id} · ${result.orientation}° · 置信度 ${result.confidence.toFixed(2)}`);
+    }else{
+      currentLocated=null;currentTransform=null;$('#add-node').disabled=true;currentPageId=undefined;renderNodeList(null);
+      setStatus(`PAPER_DETECTED_UNKNOWN · 最佳 Page ${result.best_candidate} · 置信度 ${result.confidence.toFixed(2)} · 差值 ${result.candidate_margin.toFixed(2)}`);
+    }
+  }catch(error){setStatus(`Natural 自动识别失败：${error.message}`);}
+}
+
 async function start() {
   try {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('当前浏览器不支持摄像头访问');
@@ -354,7 +381,7 @@ $('#add-node').onclick=beginNodeEditor;
 $('#close-editor').onclick=closeEditor;
 $('#pick-position').onclick=beginPositionPick;
 canvas.addEventListener('pointerup',event=>naturalPicking?pickNaturalCorner(event):placePendingNode(event));
-$('#natural-scan').onclick=beginNaturalScan;
+$('#natural-scan').onclick=autoNaturalScan;
 $('#page-mode').onchange=event=>{
   pageMode=event.target.value;
   $('#natural-scan').hidden=pageMode!=='natural';
