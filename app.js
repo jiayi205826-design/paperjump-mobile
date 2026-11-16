@@ -42,7 +42,7 @@ let cachedFingertip = null;
 const scanCanvas=document.createElement('canvas');
 const scanContext=scanCanvas.getContext('2d',{willReadFrequently:true});
 
-function setStatus(message) { $('#status').textContent = message; }
+function setStatus(message) { $('#status').textContent = message; $('#scan-message').textContent = message; }
 function normalizeText(value) { return String(value || '').replace(/\s+/g, ' ').trim(); }
 function isHttp(value) { return /^https?:\/\//i.test(value || ''); }
 function isMobileTarget(value) { return isHttp(value) || /^obsidian:\/\//i.test(value || ''); }
@@ -432,13 +432,16 @@ async function autoNaturalScan() {
 }
 
 async function start() {
+  $('#start').disabled=true;
+  $('#start').textContent='正在启动摄像头…';
   try {
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error('当前浏览器不支持摄像头访问');
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('当前打开方式不支持摄像头，请在 Chrome 或华为浏览器中打开网址');
     setStatus('请允许使用摄像头');
     stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});
     video.srcObject=stream;
     await video.play();
     running=true;
+    $('#start').textContent='扫描中';
     $('#start').disabled=true;
     $('#stop').disabled=false;
     $('#natural-scan').disabled=false;
@@ -465,13 +468,17 @@ async function start() {
       video.srcObject=null;
       running=false;
       $('#start').disabled=false;
+      $('#start').textContent='◉ 开始扫描';
       $('#stop').disabled=true;
-      setStatus(`无法启动：${error.message}`);
+      const detail=error.name==='NotAllowedError'
+        ? '摄像头权限被拒绝，请在浏览器设置中允许此网站使用摄像头'
+        : error.message;
+      setStatus(`无法启动：${detail}`);
     }
   }
 }
 
-function stop() {running=false;stream?.getTracks().forEach(track=>track.stop());hands?.close();hands=null;video.srcObject=null;currentLocated=null;currentTransform=null;stablePageId=null;stableQuad=null;missedPageFrames=0;cachedFingertip=null;fingerNode='';$('#add-node').disabled=true;$('#natural-scan').disabled=true;$('#start').disabled=false;$('#stop').disabled=true;setStatus('已停止');}
+function stop() {running=false;stream?.getTracks().forEach(track=>track.stop());hands?.close();hands=null;video.srcObject=null;currentLocated=null;currentTransform=null;stablePageId=null;stableQuad=null;missedPageFrames=0;cachedFingertip=null;fingerNode='';$('#add-node').disabled=true;$('#natural-scan').disabled=true;$('#start').disabled=false;$('#start').textContent='◉ 开始扫描';$('#stop').disabled=true;setStatus('已停止');}
 async function readJson(file) { return JSON.parse(await file.text()); }
 
 $('#start').onclick=start;
