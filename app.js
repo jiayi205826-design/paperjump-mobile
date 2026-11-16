@@ -1,4 +1,5 @@
 import {MobileNaturalRecognizer,loadOpenCv} from './natural-recognizer.js?v=3';
+import {pairingFromLocation, syncSettings, cachedSnapshot, fetchSnapshot} from './private-sync.js?v=1';
 
 const $ = selector => document.querySelector(selector);
 const video = $('#camera');
@@ -66,6 +67,15 @@ function normalizeNodes(raw) {
     })).filter(node => node.region && node.url);
   }
   return result;
+}
+
+function applyPrivateSnapshot(snapshot) {
+  pages = normalizePages(snapshot.pages);
+  nodesByPage = normalizeNodes(snapshot.nodes);
+  naturalRecognizer = new MobileNaturalRecognizer(snapshot.natural);
+  currentPageId = undefined;
+  renderNodeList(null);
+  setStatus(`已同步 ${snapshot.natural.pages.length} 张普通纸、${Object.keys(nodesByPage).length} 页链接`);
 }
 
 function regionPolygon(region) {
@@ -416,14 +426,22 @@ if(savedNatural){
   try{naturalRecognizer=new MobileNaturalRecognizer(JSON.parse(savedNatural));}
   catch{localStorage.removeItem('paperjump-natural');}
 }
-if(!naturalRecognizer){
-  try{
-    const bundledNatural=await fetch('natural_pages_mobile.json?v=1').then(response=>{
-      if(!response.ok)throw new Error(`HTTP ${response.status}`);
-      return response.json();
-    });
-    naturalRecognizer=new MobileNaturalRecognizer(bundledNatural);
-  }catch(error){console.warn('Bundled Natural features unavailable:',error);}
+async function syncPrivateData(){
+  const snapshot=await fetchSnapshot();
+  applyPrivateSnapshot(snapshot);
 }
+$('#sync-now').onclick=async()=>{
+  try{setStatus('正在同步电脑绑定数据…');await syncPrivateData();}
+  catch(error){setStatus(`同步失败：${error.message}`);}
+};
+try{
+  const paired=pairingFromLocation();
+  if(syncSettings()){
+    const cached=await cachedSnapshot();
+    if(cached)applyPrivateSnapshot(cached);
+    if(paired)await syncPrivateData();
+    else syncPrivateData().catch(error=>setStatus(`使用已缓存数据；同步失败：${error.message}`));
+  }
+}catch(error){setStatus(`配对失败：${error.message}`);}
 renderNodeList(null);
 if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');

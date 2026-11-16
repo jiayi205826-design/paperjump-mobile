@@ -57,7 +57,8 @@
     </section>
     <details class="settings">
       <summary>数据设置</summary>
-      <p>需要同步电脑上的页面或节点时，再从这里导入。</p>
+      <p>用电脑显示的配对码打开本页后，绑定数据会加密同步。网页只保存加密文件。</p>
+      <button id="sync-now" class="secondary" type="button">立即同步</button>
       <div class="import-grid">
         <label>导入页面数据 <input id="pages-file" type="file" accept="application/json,.json"></label>
         <label>导入节点数据 <input id="nodes-file" type="file" accept="application/json,.json"></label>
@@ -68,6 +69,6 @@
   <footer>Paper Portal · 触碰纸面，抵达记忆</footer>
   <script src="https://cdn.jsdelivr.net/npm/js-aruco2@2.0.0/src/cv.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/js-aruco2@2.0.0/src/aruco.js"></script>
-  <script type="module" src="app.js?v=12"></script>
+  <script type="module" src="app.js?v=13"></script>
 </body>
 </html>
