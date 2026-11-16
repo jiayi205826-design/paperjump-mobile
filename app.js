@@ -1,5 +1,6 @@
 import {MobileNaturalRecognizer,loadOpenCv} from './natural-recognizer.js?v=3';
 import {pairingFromLocation, syncSettings, cachedSnapshot, fetchSnapshot} from './private-sync.js?v=1';
+import {MobileLocalRecognizer} from './mobile-local-recognizer.js?v=1';
 
 const $ = selector => document.querySelector(selector);
 const video = $('#camera');
@@ -24,15 +25,27 @@ let editorContext = null;
 let stablePageId = null;
 let stableQuad = null;
 let missedPageFrames = 0;
-let pageMode = 'aruco';
+let pageMode = 'local';
 let naturalRecognizer = null;
 let naturalPicking = false;
 let naturalPoints = [];
 let naturalSnapshot = null;
+let localRecognizer = null;
+let pageDimensions = {};
+let localScanBusy = false;
+let lastLocalScan = 0;
+let lastLocalMatch = 0;
+let fingerNode = '';
+let fingerSince = 0;
+let lastHandScan = 0;
+let cachedFingertip = null;
+const scanCanvas=document.createElement('canvas');
+const scanContext=scanCanvas.getContext('2d',{willReadFrequently:true});
 
 function setStatus(message) { $('#status').textContent = message; }
 function normalizeText(value) { return String(value || '').replace(/\s+/g, ' ').trim(); }
 function isHttp(value) { return /^https?:\/\//i.test(value || ''); }
+function isMobileTarget(value) { return isHttp(value) || /^obsidian:\/\//i.test(value || ''); }
 
 function normalizePages(raw) {
   const result = {};
@@ -46,7 +59,8 @@ function normalizePages(raw) {
 
 function mobileUrl(node) {
   const target = node.android_target || node.mobile_target || node.conversation_url || node.target || node.url || '';
-  if (!isHttp(target)) return '';
+  if (!isMobileTarget(target)) return '';
+  if (!isHttp(target)) return target;
   if ((node.target_type || node.type) === 'chatgpt') return target;
   const anchor = normalizeText(node.anchor);
   if (!anchor) return target;
@@ -73,16 +87,22 @@ function applyPrivateSnapshot(snapshot) {
   pages = normalizePages(snapshot.pages);
   nodesByPage = normalizeNodes(snapshot.nodes);
   naturalRecognizer = new MobileNaturalRecognizer(snapshot.natural);
+  localRecognizer = new MobileLocalRecognizer(snapshot.local_anchors);
+  pageDimensions = Object.fromEntries([
+    ...snapshot.natural.pages,
+    ...snapshot.local_anchors,
+  ].map(page=>[String(page.page_id),[page.canonical_width,page.canonical_height]]));
   currentPageId = undefined;
   renderNodeList(null);
   setStatus(`已同步 ${snapshot.natural.pages.length} 张普通纸、${Object.keys(nodesByPage).length} 页链接`);
 }
 
-function regionPolygon(region) {
+function regionPolygon(region,pageId) {
   if (Array.isArray(region) && region.length === 4 && region.every(Number.isFinite)) {
     let [x1, y1, x2, y2] = region;
-    if (Math.max(Math.abs(x1), Math.abs(x2)) > 1) { x1 /= 800; x2 /= 800; }
-    if (Math.max(Math.abs(y1), Math.abs(y2)) > 1) { y1 /= 1000; y2 /= 1000; }
+    const [width,height]=pageDimensions[String(pageId)]||[800,1000];
+    if (Math.max(Math.abs(x1), Math.abs(x2)) > 1) { x1 /= width; x2 /= width; }
+    if (Math.max(Math.abs(y1), Math.abs(y2)) > 1) { y1 /= height; y2 /= height; }
     return [{x:x1,y:y1},{x:x2,y:y1},{x:x2,y:y2},{x:x1,y:y2}];
   }
   if (Array.isArray(region)) return region.map(point => Array.isArray(point) ? {x:+point[0],y:+point[1]} : {x:+point.x,y:+point.y});
@@ -257,7 +277,60 @@ async function frame() {
   if(video.readyState<2||video.currentTime===lastVideoTime)return;
   lastVideoTime=video.currentTime;
   canvas.width=video.videoWidth;canvas.height=video.videoHeight;ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  if(pageMode==='local'){
+    const now=performance.now();
+    if(localRecognizer&&!localScanBusy&&now-lastLocalScan>650){
+      lastLocalScan=now;
+      localScanBusy=true;
+      const scale=Math.min(1,960/canvas.width);
+      scanCanvas.width=Math.round(canvas.width*scale);
+      scanCanvas.height=Math.round(canvas.height*scale);
+      scanContext.drawImage(video,0,0,scanCanvas.width,scanCanvas.height);
+      const image=scanContext.getImageData(0,0,scanCanvas.width,scanCanvas.height);
+      localRecognizer.recognize(image).then(found=>{
+        if(pageMode!=='local')return;
+        if(found){
+          currentLocated={...found,quad:found.quad.map(p=>({x:p.x/scale,y:p.y/scale}))};
+          currentTransform=homography(currentLocated.quad);
+          lastLocalMatch=performance.now();
+          renderNodeList(found.pageId);
+          setStatus(`已识别局部锚点 · 第 ${found.pageId} 页`);
+        }else if(performance.now()-lastLocalMatch>1100){
+          currentLocated=null;currentTransform=null;renderNodeList(null);
+          setStatus('正在寻找已绑定字迹…');
+        }
+      }).catch(error=>setStatus(`局部识别失败：${error.message}`))
+        .finally(()=>{localScanBusy=false;});
+    }
+    let fingertip=cachedFingertip,active=null;
+    if(hands&&currentLocated&&currentTransform){
+      if(now-lastHandScan>100){
+        lastHandScan=now;
+        const result=hands.detectForVideo(video,now);
+        cachedFingertip=result.landmarks?.[0]
+          ? {x:result.landmarks[0][8].x*canvas.width,y:result.landmarks[0][8].y*canvas.height}
+          : null;
+      }
+      fingertip=cachedFingertip;
+      if(fingertip){
+        const point=mapPoint(currentTransform,fingertip);
+        active=(nodesByPage[currentLocated.pageId]||[]).find(node=>
+          inside(point,regionPolygon(node.region,currentLocated.pageId)));
+      }
+    }
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(video,0,0,canvas.width,canvas.height);
+    draw([],currentLocated,fingertip,active);
+    const key=active?`${currentLocated.pageId}:${active.name}`:'';
+    if(key!==fingerNode){fingerNode=key;fingerSince=now;}
+    if(active&&now-fingerSince>700&&now-lastOpen>2200){
+      lastOpen=now;fingerNode='';
+      window.location.assign(active.url);
+    }
+    return;
+  }
   if(pageMode==='natural')return;
+  if(!detector)return setStatus('ArUco 识别组件未加载，请刷新页面');
   const markers=detector.detect(ctx.getImageData(0,0,canvas.width,canvas.height));
   const located=stabilizePage(locatePage(markers));
   currentLocated=located;
@@ -267,7 +340,7 @@ async function frame() {
   const result=hands ? hands.detectForVideo(video,performance.now()) : {landmarks:[]};
   if(result.landmarks?.[0]){
     const tip=result.landmarks[0][8];fingertip={x:tip.x*canvas.width,y:tip.y*canvas.height};
-    if(located){const point=currentTransform&&mapPoint(currentTransform,fingertip);active=point&&(nodesByPage[located.pageId]||[]).find(node=>inside(point,regionPolygon(node.region)));}
+    if(located){const point=currentTransform&&mapPoint(currentTransform,fingertip);active=point&&(nodesByPage[located.pageId]||[]).find(node=>inside(point,regionPolygon(node.region,located.pageId)));}
   }
   ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(video,0,0,canvas.width,canvas.height);draw(markers,located,fingertip,active);
   renderNodeList(located?.pageId ?? null);
@@ -372,14 +445,17 @@ async function start() {
     $('#hint').hidden=true;
 
     setStatus('相机已开启，正在加载识别');
-    if(!window.AR)throw new Error('ArUco 识别库加载失败，请检查网络');
-    window.AR.DICTIONARIES.DICT_4X4_50={nBits:16,tau:4,codeList:DICT_4X4_50};
-    detector=new window.AR.Detector({dictionaryName:'DICT_4X4_50',maxHammingDistance:1});
+    if(window.AR){
+      window.AR.DICTIONARIES.DICT_4X4_50={nBits:16,tau:4,codeList:DICT_4X4_50};
+      detector=new window.AR.Detector({dictionaryName:'DICT_4X4_50',maxHammingDistance:1});
+    }else if(pageMode==='aruco')throw new Error('ArUco 识别库加载失败，请检查网络');
     frame();
-    const {FilesetResolver, HandLandmarker}=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/vision_bundle.mjs');
-    const vision=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/wasm');
-    hands=await HandLandmarker.createFromOptions(vision,{baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:'GPU'},runningMode:'VIDEO',numHands:1});
-    setStatus('识别已就绪');
+    try{
+      const {FilesetResolver, HandLandmarker}=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/vision_bundle.mjs');
+      const vision=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/wasm');
+      hands=await HandLandmarker.createFromOptions(vision,{baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:'GPU'},runningMode:'VIDEO',numHands:1});
+      setStatus('识别已就绪');
+    }catch(error){setStatus(`纸面识别已就绪；手指识别暂不可用：${error.message}`);}
   } catch(error) {
     if (stream?.active) {
       setStatus(`相机可用，识别组件未加载：${error.message}`);
@@ -395,7 +471,7 @@ async function start() {
   }
 }
 
-function stop() {running=false;stream?.getTracks().forEach(track=>track.stop());hands?.close();video.srcObject=null;currentLocated=null;currentTransform=null;stablePageId=null;stableQuad=null;missedPageFrames=0;$('#add-node').disabled=true;$('#natural-scan').disabled=true;$('#start').disabled=false;$('#stop').disabled=true;setStatus('已停止');}
+function stop() {running=false;stream?.getTracks().forEach(track=>track.stop());hands?.close();hands=null;video.srcObject=null;currentLocated=null;currentTransform=null;stablePageId=null;stableQuad=null;missedPageFrames=0;cachedFingertip=null;fingerNode='';$('#add-node').disabled=true;$('#natural-scan').disabled=true;$('#start').disabled=false;$('#stop').disabled=true;setStatus('已停止');}
 async function readJson(file) { return JSON.parse(await file.text()); }
 
 $('#start').onclick=start;
@@ -410,7 +486,7 @@ $('#page-mode').onchange=event=>{
   $('#natural-scan').hidden=pageMode!=='natural';
   $('#natural-scan').disabled=!running;
   currentLocated=null;currentTransform=null;currentPageId=undefined;renderNodeList(null);$('#add-node').disabled=true;
-  setStatus(pageMode==='natural'?'Natural 模式：请冻结并确认四角':'ArUco 模式');
+  setStatus(pageMode==='natural'?'普通纸模式：点击自动识别':pageMode==='local'?'局部字迹模式：对准已绑定区域':'ArUco 模式');
 };
 $('#pages-file').onchange=async event=>{try{pages=normalizePages(await readJson(event.target.files[0]));localStorage.setItem('paperjump-pages',JSON.stringify(pages));setStatus(`已导入 ${Object.keys(pages).length} 个 ArUco 页面`);}catch{setStatus('pages.json 无效');}};
 $('#nodes-file').onchange=async event=>{try{nodesByPage=normalizeNodes(await readJson(event.target.files[0]));localStorage.setItem('paperjump-nodes',JSON.stringify(nodesByPage));currentPageId=undefined;renderNodeList(null);setStatus('节点数据已导入');}catch{setStatus('custom_nodes.json 无效');}};

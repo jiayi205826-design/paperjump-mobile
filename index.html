@@ -24,7 +24,7 @@
       <video id="camera" playsinline muted></video>
       <canvas id="overlay"></canvas>
       <div class="camera-badge"><i></i> 实时识别</div>
-      <p id="hint">轻触下方按钮开始扫描，将带有四个角标的纸张完整放入画面。</p>
+      <p id="hint">轻触开始扫描，对准已绑定的字迹或图案。</p>
     </section>
     <section class="actions">
       <button id="start">◉&ensp;开始扫描</button>
@@ -33,6 +33,7 @@
     <section class="mode-bar">
       <label>识别模式
         <select id="page-mode">
+          <option value="local">局部字迹（推荐）</option>
           <option value="aruco">ArUco 四角纸</option>
           <option value="natural">Natural 普通纸</option>
         </select>
@@ -69,6 +70,6 @@
   <footer>Paper Portal · 触碰纸面，抵达记忆</footer>
   <script src="https://cdn.jsdelivr.net/npm/js-aruco2@2.0.0/src/cv.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/js-aruco2@2.0.0/src/aruco.js"></script>
-  <script type="module" src="app.js?v=13"></script>
+  <script type="module" src="app.js?v=14"></script>
 </body>
 </html>
