@@ -310,7 +310,8 @@ public final class MainActivity extends ComponentActivity {
             openButton.setEnabled(singleNode);
             openButton.setText(singleNode ? "打开「" + found.nodes.get(0).node.name + "」"
                     : "识别后点选绑定区域");
-            if (found != null) showStatus("已识别第 " + found.anchor.pageId + " 页 · " + found.inliers + " 个一致特征点");
+            if (found != null) showStatus("已识别第 " + found.anchor.pageId + " 页 · "
+                    + found.nodes.size() + " 处绑定区域");
             else showStatus("正在寻找已绑定字迹…");
         });
     }
