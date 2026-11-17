@@ -8,12 +8,14 @@ import java.io.OutputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.InterfaceAddress;
+import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
-import java.util.Arrays;
+import java.util.Enumeration;
 
 import javax.crypto.Cipher;
 import javax.crypto.Mac;
@@ -78,7 +80,22 @@ final class WifiCameraServer {
             String message = "paperjump-wifi-v1|" + nonce;
             byte[] packet = (message + "|" + hex(sign(message))).getBytes(StandardCharsets.US_ASCII);
             while (running) {
-                socket.send(new DatagramPacket(packet, packet.length,
+                Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+                boolean sent = false;
+                while (interfaces != null && interfaces.hasMoreElements()) {
+                    NetworkInterface network = interfaces.nextElement();
+                    try {
+                        if (!network.isUp() || network.isLoopback()) continue;
+                        for (InterfaceAddress address : network.getInterfaceAddresses()) {
+                            InetAddress broadcast = address.getBroadcast();
+                            if (broadcast == null) continue;
+                            socket.send(new DatagramPacket(packet, packet.length,
+                                    broadcast, DISCOVERY_PORT));
+                            sent = true;
+                        }
+                    } catch (Exception ignored) { }
+                }
+                if (!sent) socket.send(new DatagramPacket(packet, packet.length,
                         InetAddress.getByName("255.255.255.255"), DISCOVERY_PORT));
                 Thread.sleep(1000);
             }
