@@ -35,6 +35,7 @@ import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.Point;
 import org.opencv.imgproc.Imgproc;
+import org.opencv.objdetect.QRCodeDetector;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -47,6 +48,8 @@ public final class MainActivity extends ComponentActivity {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private List<BindingData.Anchor> anchors = Collections.emptyList();
     private LocalMatcher matcher;
+    private QRCodeDetector pairingScanner;
+    private volatile boolean pairingNeeded = true;
     private PreviewView preview;
     private MatchOverlay overlay;
     private TextView status;
@@ -63,12 +66,17 @@ public final class MainActivity extends ComponentActivity {
             setContentView(error);
             return;
         }
+        pairingScanner = new QRCodeDetector();
         matcher = new LocalMatcher();
         buildUi();
-        receivePairing(getIntent());
         String key = getPreferences(MODE_PRIVATE).getString("binding_key", "");
-        if (!key.isEmpty()) sync(key);
-        else showStatus("请用手机扫描电脑上的 PaperJump 安卓配对码");
+        if (!key.isEmpty()) {
+            pairingNeeded = false;
+            sync(key);
+        } else {
+            showStatus("请用此摄像头对准电脑上的安卓配对码");
+        }
+        receivePairing(getIntent());
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
             startCamera();
         else requestPermissions(new String[]{Manifest.permission.CAMERA}, 7);
@@ -106,7 +114,7 @@ public final class MainActivity extends ComponentActivity {
         syncButton.setText("同步绑定");
         syncButton.setOnClickListener(v -> {
             String key = getPreferences(MODE_PRIVATE).getString("binding_key", "");
-            if (key.isEmpty()) showStatus("请先扫描电脑上的安卓配对码");
+            if (key.isEmpty()) showStatus("请用此摄像头对准电脑上的安卓配对码");
             else sync(key);
         });
         buttons.addView(syncButton, new LinearLayout.LayoutParams(0, -2, 1));
@@ -116,7 +124,11 @@ public final class MainActivity extends ComponentActivity {
 
     private void receivePairing(Intent intent) {
         if (intent == null || intent.getData() == null) return;
-        Uri uri = intent.getData();
+        receivePairingUri(intent.getData().toString());
+    }
+
+    private void receivePairingUri(String value) {
+        Uri uri = Uri.parse(value);
         if (!"paperjump".equals(uri.getScheme()) || !"pair".equals(uri.getHost())) return;
         try {
             byte[] raw = Base64.decode(uri.getQueryParameter("sync"), Base64.URL_SAFE | Base64.NO_WRAP);
@@ -124,6 +136,7 @@ public final class MainActivity extends ComponentActivity {
             String key = settings.getString("key");
             if (Base64.decode(key, Base64.DEFAULT).length != 32) throw new IllegalArgumentException("密钥长度错误");
             getPreferences(MODE_PRIVATE).edit().putString("binding_key", key).apply();
+            pairingNeeded = false;
             showStatus("已配对，正在同步绑定数据…");
             sync(key);
         } catch (Exception error) {
@@ -169,7 +182,7 @@ public final class MainActivity extends ComponentActivity {
     private void analyze(ImageProxy image) {
         try {
             long now = SystemClock.elapsedRealtime();
-            if (now - lastAnalysis < 450 || anchors.isEmpty()) return;
+            if (now - lastAnalysis < 450 || (!pairingNeeded && anchors.isEmpty())) return;
             lastAnalysis = now;
             Mat rgba = imageToMat(image);
             Mat oriented = new Mat(), gray = new Mat(), small = new Mat();
@@ -183,6 +196,12 @@ public final class MainActivity extends ComponentActivity {
                 double scale = Math.min(1.0, 960.0 / gray.cols());
                 Imgproc.resize(gray, small, new org.opencv.core.Size(
                         Math.round(gray.cols() * scale), Math.round(gray.rows() * scale)));
+                if (pairingNeeded) {
+                    String code = pairingScanner.detectAndDecode(small);
+                    if (code.startsWith("paperjump://pair?"))
+                        runOnUiThread(() -> receivePairingUri(code));
+                    return;
+                }
                 LocalMatcher.Match found = matcher.find(small, anchors);
                 if (found != null) {
                     lastMatch = now;
