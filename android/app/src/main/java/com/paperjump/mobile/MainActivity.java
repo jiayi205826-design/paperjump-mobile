@@ -49,6 +49,7 @@ import java.util.concurrent.Executors;
 
 public final class MainActivity extends ComponentActivity {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final ExecutorService syncWorker = Executors.newSingleThreadExecutor();
     private List<BindingData.Anchor> anchors = Collections.emptyList();
     private LocalMatcher matcher;
     private QRCodeDetector pairingScanner;
@@ -171,7 +172,7 @@ public final class MainActivity extends ComponentActivity {
 
     private void sync(String key) {
         showStatus("正在读取加密绑定数据…");
-        worker.execute(() -> {
+        syncWorker.execute(() -> {
             try {
                 List<BindingData.Anchor> loaded = BindingData.fetch(key);
                 List<BindingData.Anchor> previous = anchors;
@@ -328,6 +329,7 @@ public final class MainActivity extends ComponentActivity {
     @Override protected void onDestroy() {
         super.onDestroy();
         worker.shutdownNow();
+        syncWorker.shutdownNow();
         if (wifiCamera != null) wifiCamera.stop();
         for (BindingData.Anchor anchor : anchors) anchor.descriptors.release();
     }
