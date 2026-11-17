@@ -53,6 +53,7 @@ public final class MainActivity extends ComponentActivity {
     private PreviewView preview;
     private MatchOverlay overlay;
     private TextView status;
+    private TextView pairingStatus;
     private Button openButton;
     private volatile long lastAnalysis;
     private volatile long lastMatch;
@@ -72,6 +73,7 @@ public final class MainActivity extends ComponentActivity {
         String key = getPreferences(MODE_PRIVATE).getString("binding_key", "");
         if (!key.isEmpty()) {
             pairingNeeded = false;
+            pairingStatus.setText("已配对 · 正在同步绑定");
             sync(key);
         } else {
             showStatus("请用此摄像头对准电脑上的安卓配对码");
@@ -96,6 +98,12 @@ public final class MainActivity extends ComponentActivity {
         status.setTextSize(15);
         status.setPadding(24, 18, 24, 18);
         root.addView(status, new LinearLayout.LayoutParams(-1, -2));
+        pairingStatus = new TextView(this);
+        pairingStatus.setTextColor(Color.rgb(255, 190, 215));
+        pairingStatus.setTextSize(13);
+        pairingStatus.setPadding(24, 0, 24, 12);
+        pairingStatus.setText("未配对");
+        root.addView(pairingStatus, new LinearLayout.LayoutParams(-1, -2));
         FrameLayout camera = new FrameLayout(this);
         preview = new PreviewView(this);
         preview.setScaleType(PreviewView.ScaleType.FIT_CENTER);
@@ -137,6 +145,7 @@ public final class MainActivity extends ComponentActivity {
             if (Base64.decode(key, Base64.DEFAULT).length != 32) throw new IllegalArgumentException("密钥长度错误");
             getPreferences(MODE_PRIVATE).edit().putString("binding_key", key).apply();
             pairingNeeded = false;
+            pairingStatus.setText("配对码已扫描 · 正在同步绑定");
             showStatus("已配对，正在同步绑定数据…");
             sync(key);
         } catch (Exception error) {
@@ -152,9 +161,15 @@ public final class MainActivity extends ComponentActivity {
                 List<BindingData.Anchor> previous = anchors;
                 anchors = loaded;
                 for (BindingData.Anchor anchor : previous) anchor.descriptors.release();
-                runOnUiThread(() -> showStatus("已同步 " + loaded.size() + " 处局部锚点，正在识别…"));
+                runOnUiThread(() -> {
+                    pairingStatus.setText("配对成功 · 已同步 " + loaded.size() + " 处局部锚点");
+                    showStatus("正在寻找已绑定字迹…");
+                });
             } catch (Exception error) {
-                runOnUiThread(() -> showStatus("同步失败：" + error.getMessage()));
+                runOnUiThread(() -> {
+                    pairingStatus.setText("已扫描配对码 · 同步失败");
+                    showStatus("同步失败：" + error.getMessage());
+                });
             }
         });
     }

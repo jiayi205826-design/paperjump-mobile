@@ -32,9 +32,10 @@ final class BindingData {
         final Mat descriptors;
         final String title;
         final String url;
+        final boolean natural;
 
         Anchor(String pageId, int width, int height, Point[] points, Mat descriptors,
-               String title, String url) {
+               String title, String url, boolean natural) {
             this.pageId = pageId;
             this.width = width;
             this.height = height;
@@ -42,6 +43,7 @@ final class BindingData {
             this.descriptors = descriptors;
             this.title = title;
             this.url = url;
+            this.natural = natural;
         }
     }
 
@@ -68,8 +70,17 @@ final class BindingData {
             if (!"paperjump-private-mobile-v1".equals(snapshot.optString("format")))
                 throw new IllegalArgumentException("绑定数据格式错误");
             JSONObject nodes = snapshot.getJSONObject("nodes");
-            JSONArray raw = snapshot.getJSONArray("local_anchors");
             List<Anchor> anchors = new ArrayList<>();
+            addAnchors(anchors, snapshot.getJSONArray("local_anchors"), nodes, false);
+            addAnchors(anchors, snapshot.getJSONObject("natural").getJSONArray("pages"), nodes, true);
+            return anchors;
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private static void addAnchors(List<Anchor> anchors, JSONArray raw, JSONObject nodes,
+                                   boolean natural) throws Exception {
             for (int i = 0; i < raw.length(); i++) {
                 JSONObject item = raw.getJSONObject(i);
                 String pageId = item.getString("page_id");
@@ -97,12 +108,8 @@ final class BindingData {
                     }
                 }
                 anchors.add(new Anchor(pageId, item.getInt("canonical_width"),
-                        item.getInt("canonical_height"), points, descriptors, title, target));
+                        item.getInt("canonical_height"), points, descriptors, title, target, natural));
             }
-            return anchors;
-        } finally {
-            connection.disconnect();
-        }
     }
 
     private static String firstTarget(JSONObject node) {

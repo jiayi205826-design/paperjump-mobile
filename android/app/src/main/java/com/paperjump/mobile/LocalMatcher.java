@@ -30,20 +30,27 @@ final class LocalMatcher {
         }
     }
 
-    private final ORB orb = ORB.create(1200, 1.2f, 8, 8, 0, 2, ORB.HARRIS_SCORE, 15, 10);
+    private final ORB localOrb = ORB.create(1200, 1.2f, 8, 8, 0, 2, ORB.HARRIS_SCORE, 15, 10);
+    private final ORB naturalOrb = ORB.create(2500);
     private final BFMatcher matcher = BFMatcher.create(Core.NORM_HAMMING, false);
 
     Match find(Mat gray, List<BindingData.Anchor> anchors) {
+        Match local = findGroup(gray, anchors, false);
+        return local != null ? local : findGroup(gray, anchors, true);
+    }
+
+    private Match findGroup(Mat gray, List<BindingData.Anchor> anchors, boolean natural) {
         MatOfKeyPoint queryPoints = new MatOfKeyPoint();
         Mat queryDescriptors = new Mat();
         try {
             Mat emptyMask = new Mat();
-            try { orb.detectAndCompute(gray, emptyMask, queryPoints, queryDescriptors); }
+            try { (natural ? naturalOrb : localOrb).detectAndCompute(gray, emptyMask, queryPoints, queryDescriptors); }
             finally { emptyMask.release(); }
             if (queryDescriptors.empty()) return null;
             KeyPoint[] query = queryPoints.toArray();
             Match best = null, second = null;
             for (BindingData.Anchor anchor : anchors) {
+                if (anchor.natural != natural) continue;
                 Match current = match(anchor, query, queryDescriptors);
                 if (current == null) continue;
                 if (best == null || current.inliers > best.inliers) {
@@ -73,7 +80,7 @@ final class LocalMatcher {
                 if (candidates.length >= 2 && candidates[0].distance < .75 * candidates[1].distance)
                     good.add(candidates[0]);
             }
-            if (good.size() < 10) return null;
+            if (good.size() < 8) return null;
             Point[] source = new Point[good.size()];
             Point[] target = new Point[good.size()];
             for (int i = 0; i < good.size(); i++) {
@@ -98,7 +105,7 @@ final class LocalMatcher {
                     Point moved = project(h, source[i]);
                     error += Math.pow(moved.x - target[i].x, 2) + Math.pow(moved.y - target[i].y, 2);
                 }
-                if (inliers < 10 || inliers < good.size() * .55
+                if (inliers < 8 || inliers < good.size() * .5
                         || Math.sqrt(error / inliers) > 3) return null;
                 if (area(hull(inlierSource)) / (anchor.width * anchor.height) < .06) return null;
                 Point[] corners = new Point[]{
