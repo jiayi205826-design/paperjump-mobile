@@ -33,7 +33,10 @@ import org.opencv.android.OpenCVLoader;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
+import org.opencv.core.MatOfByte;
+import org.opencv.core.MatOfInt;
 import org.opencv.core.Point;
+import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
 import org.opencv.objdetect.QRCodeDetector;
 
@@ -49,6 +52,8 @@ public final class MainActivity extends ComponentActivity {
     private List<BindingData.Anchor> anchors = Collections.emptyList();
     private LocalMatcher matcher;
     private QRCodeDetector pairingScanner;
+    private WifiCameraServer wifiCamera;
+    private boolean showingDesktopStream;
     private volatile boolean pairingNeeded = true;
     private PreviewView preview;
     private MatchOverlay overlay;
@@ -74,6 +79,7 @@ public final class MainActivity extends ComponentActivity {
         if (!key.isEmpty()) {
             pairingNeeded = false;
             pairingStatus.setText("已配对 · 正在同步绑定");
+            startWifiCamera(key);
             sync(key);
         } else {
             showStatus("请用此摄像头对准电脑上的安卓配对码");
@@ -146,10 +152,20 @@ public final class MainActivity extends ComponentActivity {
             getPreferences(MODE_PRIVATE).edit().putString("binding_key", key).apply();
             pairingNeeded = false;
             pairingStatus.setText("配对码已扫描 · 正在同步绑定");
+            startWifiCamera(key);
             showStatus("已配对，正在同步绑定数据…");
             sync(key);
         } catch (Exception error) {
             showStatus("配对码无效：" + error.getMessage());
+        }
+    }
+
+    private void startWifiCamera(String key) {
+        if (wifiCamera != null) return;
+        try {
+            wifiCamera = new WifiCameraServer(key);
+        } catch (Exception error) {
+            showStatus("Wi-Fi 摄像头启动失败：" + error.getMessage());
         }
     }
 
@@ -197,7 +213,9 @@ public final class MainActivity extends ComponentActivity {
     private void analyze(ImageProxy image) {
         try {
             long now = SystemClock.elapsedRealtime();
-            if (now - lastAnalysis < 450 || (!pairingNeeded && anchors.isEmpty())) return;
+            boolean streaming = wifiCamera != null && wifiCamera.isConnected();
+            if (now - lastAnalysis < (streaming ? 120 : 450)
+                    || (!streaming && !pairingNeeded && anchors.isEmpty())) return;
             lastAnalysis = now;
             Mat rgba = imageToMat(image);
             Mat oriented = new Mat(), gray = new Mat(), small = new Mat();
@@ -207,6 +225,33 @@ public final class MainActivity extends ComponentActivity {
                 else if (rotation == 180) Core.rotate(rgba, oriented, Core.ROTATE_180);
                 else if (rotation == 270) Core.rotate(rgba, oriented, Core.ROTATE_90_COUNTERCLOCKWISE);
                 else rgba.copyTo(oriented);
+                if (streaming) {
+                    MatOfByte encoded = new MatOfByte();
+                    MatOfInt quality = new MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 75);
+                    Mat streamFrame = new Mat();
+                    try {
+                        double streamScale = Math.min(1.0, 960.0 / oriented.cols());
+                        Imgproc.resize(oriented, streamFrame, new org.opencv.core.Size(
+                                Math.round(oriented.cols() * streamScale),
+                                Math.round(oriented.rows() * streamScale)));
+                        Imgcodecs.imencode(".jpg", streamFrame, encoded, quality);
+                        wifiCamera.offerFrame(encoded.toArray());
+                    } finally { encoded.release(); quality.release(); streamFrame.release(); }
+                    if (!showingDesktopStream) {
+                        showingDesktopStream = true;
+                        runOnUiThread(() -> {
+                            pairingStatus.setText("已连接电脑 · 手机正在提供摄像头画面");
+                            visibleMatch = null;
+                            overlay.setMatch(null, 0, 0);
+                            openButton.setEnabled(false);
+                        });
+                    }
+                    return;
+                }
+                if (showingDesktopStream) {
+                    showingDesktopStream = false;
+                    runOnUiThread(() -> pairingStatus.setText("已配对 · 等待电脑连接摄像头"));
+                }
                 Imgproc.cvtColor(oriented, gray, Imgproc.COLOR_RGBA2GRAY);
                 double scale = Math.min(1.0, 960.0 / gray.cols());
                 Imgproc.resize(gray, small, new org.opencv.core.Size(
@@ -283,6 +328,7 @@ public final class MainActivity extends ComponentActivity {
     @Override protected void onDestroy() {
         super.onDestroy();
         worker.shutdownNow();
+        if (wifiCamera != null) wifiCamera.stop();
         for (BindingData.Anchor anchor : anchors) anchor.descriptors.release();
     }
 
