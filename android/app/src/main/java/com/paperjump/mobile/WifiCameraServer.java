@@ -8,6 +8,7 @@ import java.io.OutputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.Inet4Address;
 import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
 import java.net.ServerSocket;
@@ -46,6 +47,22 @@ final class WifiCameraServer {
 
     boolean isConnected() { return connected; }
 
+    static String localAddress() {
+        try {
+            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+            while (interfaces != null && interfaces.hasMoreElements()) {
+                NetworkInterface network = interfaces.nextElement();
+                if (!network.isUp() || network.isLoopback()) continue;
+                for (InterfaceAddress address : network.getInterfaceAddresses()) {
+                    if (address.getAddress() instanceof Inet4Address
+                            && address.getBroadcast() != null)
+                        return address.getAddress().getHostAddress();
+                }
+            }
+        } catch (Exception ignored) { }
+        return "未连接局域网";
+    }
+
     void offerFrame(byte[] jpeg) {
         synchronized (frameLock) {
             frame = jpeg;
@@ -80,6 +97,7 @@ final class WifiCameraServer {
             String message = "paperjump-wifi-v1|" + nonce;
             byte[] packet = (message + "|" + hex(sign(message))).getBytes(StandardCharsets.US_ASCII);
             while (running) {
+                try {
                 Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
                 boolean sent = false;
                 while (interfaces != null && interfaces.hasMoreElements()) {
@@ -97,6 +115,7 @@ final class WifiCameraServer {
                 }
                 if (!sent) socket.send(new DatagramPacket(packet, packet.length,
                         InetAddress.getByName("255.255.255.255"), DISCOVERY_PORT));
+                } catch (Exception ignored) { }
                 Thread.sleep(1000);
             }
         } catch (Exception ignored) { }
@@ -110,10 +129,18 @@ final class WifiCameraServer {
                         client.getInputStream(), StandardCharsets.US_ASCII));
                 String request = reader.readLine();
                 String expected = "GET /stream?token=" + hex(sign("stream|" + hex(session))) + " HTTP/1.1";
-                if (!expected.equals(request)) continue;
                 String line;
                 while ((line = reader.readLine()) != null && !line.isEmpty()) { }
                 OutputStream output = client.getOutputStream();
+                if ("GET /nonce HTTP/1.1".equals(request)) {
+                    byte[] nonce = hex(session).getBytes(StandardCharsets.US_ASCII);
+                    output.write(("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: "
+                            + nonce.length + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+                    output.write(nonce);
+                    output.flush();
+                    continue;
+                }
+                if (!expected.equals(request)) continue;
                 output.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nCache-Control: no-store\r\n\r\n"
                         .getBytes(StandardCharsets.US_ASCII));
                 output.flush();

@@ -24,25 +24,35 @@ import javax.crypto.spec.SecretKeySpec;
 final class BindingData {
     static final String SOURCE = "https://paper-portal.pages.dev/private-data.enc.json";
 
+    static final class Node {
+        final String name;
+        final String url;
+        final double[] region;
+
+        Node(String name, String url, double[] region) {
+            this.name = name;
+            this.url = url;
+            this.region = region;
+        }
+    }
+
     static final class Anchor {
         final String pageId;
         final int width;
         final int height;
         final Point[] points;
         final Mat descriptors;
-        final String title;
-        final String url;
+        final List<Node> nodes;
         final boolean natural;
 
         Anchor(String pageId, int width, int height, Point[] points, Mat descriptors,
-               String title, String url, boolean natural) {
+               List<Node> nodes, boolean natural) {
             this.pageId = pageId;
             this.width = width;
             this.height = height;
             this.points = points;
             this.descriptors = descriptors;
-            this.title = title;
-            this.url = url;
+            this.nodes = nodes;
             this.natural = natural;
         }
     }
@@ -94,8 +104,7 @@ final class BindingData {
                 }
                 Mat descriptors = new Mat(points.length, 32, CvType.CV_8U);
                 descriptors.put(0, 0, bytes);
-                String title = "第 " + pageId + " 页";
-                String target = "";
+                List<Node> bindings = new ArrayList<>();
                 JSONObject pageNodes = nodes.optJSONObject(pageId);
                 if (pageNodes != null) {
                     java.util.Iterator<String> names = pageNodes.keys();
@@ -104,11 +113,15 @@ final class BindingData {
                         JSONObject node = pageNodes.optJSONObject(name);
                         if (node == null) continue;
                         String candidate = firstTarget(node);
-                        if (!candidate.isEmpty()) { title = name; target = candidate; break; }
+                        JSONArray region = node.optJSONArray("region");
+                        if (candidate.isEmpty() || region == null || region.length() != 4) continue;
+                        bindings.add(new Node(name, candidate, new double[]{
+                                region.getDouble(0), region.getDouble(1),
+                                region.getDouble(2), region.getDouble(3)}));
                     }
                 }
                 anchors.add(new Anchor(pageId, item.getInt("canonical_width"),
-                        item.getInt("canonical_height"), points, descriptors, title, target, natural));
+                        item.getInt("canonical_height"), points, descriptors, bindings, natural));
             }
     }
 

@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.os.SystemClock;
 import android.util.Base64;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.FrameLayout;
@@ -46,6 +47,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 public final class MainActivity extends ComponentActivity {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -114,14 +116,14 @@ public final class MainActivity extends ComponentActivity {
         FrameLayout camera = new FrameLayout(this);
         preview = new PreviewView(this);
         preview.setScaleType(PreviewView.ScaleType.FIT_CENTER);
-        overlay = new MatchOverlay(this);
+        overlay = new MatchOverlay(this, this::openNode);
         camera.addView(preview, new FrameLayout.LayoutParams(-1, -1));
         camera.addView(overlay, new FrameLayout.LayoutParams(-1, -1));
         root.addView(camera, new LinearLayout.LayoutParams(-1, 0, 1));
         LinearLayout buttons = new LinearLayout(this);
         buttons.setGravity(Gravity.CENTER);
         openButton = new Button(this);
-        openButton.setText("指向识别后打开");
+        openButton.setText("识别后点选绑定区域");
         openButton.setEnabled(false);
         openButton.setOnClickListener(v -> openVisible());
         buttons.addView(openButton, new LinearLayout.LayoutParams(0, -2, 1));
@@ -179,7 +181,8 @@ public final class MainActivity extends ComponentActivity {
                 anchors = loaded;
                 for (BindingData.Anchor anchor : previous) anchor.descriptors.release();
                 runOnUiThread(() -> {
-                    pairingStatus.setText("配对成功 · 已同步 " + loaded.size() + " 处局部锚点");
+                    pairingStatus.setText("已同步 " + loaded.size() + " 组特征 · 手机地址 "
+                            + WifiCameraServer.localAddress());
                     showStatus("正在寻找已绑定字迹…");
                 });
             } catch (Exception error) {
@@ -251,7 +254,8 @@ public final class MainActivity extends ComponentActivity {
                 }
                 if (showingDesktopStream) {
                     showingDesktopStream = false;
-                    runOnUiThread(() -> pairingStatus.setText("已配对 · 等待电脑连接摄像头"));
+                    runOnUiThread(() -> pairingStatus.setText("等待电脑连接 · 手机地址 "
+                            + WifiCameraServer.localAddress()));
                 }
                 Imgproc.cvtColor(oriented, gray, Imgproc.COLOR_RGBA2GRAY);
                 double scale = Math.min(1.0, 960.0 / gray.cols());
@@ -302,16 +306,22 @@ public final class MainActivity extends ComponentActivity {
         runOnUiThread(() -> {
             visibleMatch = found;
             overlay.setMatch(found, width, height);
-            openButton.setEnabled(found != null && !found.anchor.url.isEmpty());
-            openButton.setText(found == null ? "指向识别后打开" : "打开「" + found.anchor.title + "」");
+            boolean singleNode = found != null && found.nodes.size() == 1;
+            openButton.setEnabled(singleNode);
+            openButton.setText(singleNode ? "打开「" + found.nodes.get(0).node.name + "」"
+                    : "识别后点选绑定区域");
             if (found != null) showStatus("已识别第 " + found.anchor.pageId + " 页 · " + found.inliers + " 个一致特征点");
             else showStatus("正在寻找已绑定字迹…");
         });
     }
 
     private void openVisible() {
-        if (visibleMatch == null || visibleMatch.anchor.url.isEmpty()) return;
-        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(visibleMatch.anchor.url))); }
+        if (visibleMatch != null && visibleMatch.nodes.size() == 1)
+            openNode(visibleMatch.nodes.get(0).node);
+    }
+
+    private void openNode(BindingData.Node node) {
+        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(node.url))); }
         catch (Exception error) { showStatus("无法打开绑定目标：" + error.getMessage()); }
     }
 
@@ -336,10 +346,14 @@ public final class MainActivity extends ComponentActivity {
 
     private static final class MatchOverlay extends View {
         private final Paint paint = new Paint(3);
+        private final Consumer<BindingData.Node> openNode;
         private LocalMatcher.Match match;
         private int frameWidth, frameHeight;
 
-        MatchOverlay(android.content.Context context) { super(context); }
+        MatchOverlay(android.content.Context context, Consumer<BindingData.Node> openNode) {
+            super(context);
+            this.openNode = openNode;
+        }
 
         void setMatch(LocalMatcher.Match found, int width, int height) {
             match = found; frameWidth = width; frameHeight = height; invalidate();
@@ -351,16 +365,53 @@ public final class MainActivity extends ComponentActivity {
             double scale = Math.min((double) getWidth() / frameWidth, (double) getHeight() / frameHeight);
             float left = (float) ((getWidth() - frameWidth * scale) / 2);
             float top = (float) ((getHeight() - frameHeight * scale) / 2);
-            paint.setColor(Color.rgb(231, 104, 155));
-            paint.setStrokeWidth(3);
+            paint.setColor(Color.argb(170, 231, 104, 155));
+            paint.setStrokeWidth(2);
             paint.setStyle(Paint.Style.STROKE);
-            android.graphics.Path path = new android.graphics.Path();
-            Point[] points = match.corners;
-            path.moveTo(left + (float) (points[0].x * scale), top + (float) (points[0].y * scale));
-            for (int i = 1; i < points.length; i++)
-                path.lineTo(left + (float) (points[i].x * scale), top + (float) (points[i].y * scale));
-            path.close();
-            canvas.drawPath(path, paint);
+            for (LocalMatcher.NodeMatch node : match.nodes) {
+                android.graphics.Path path = new android.graphics.Path();
+                Point[] points = node.corners;
+                path.moveTo(left + (float) (points[0].x * scale), top + (float) (points[0].y * scale));
+                for (int i = 1; i < points.length; i++)
+                    path.lineTo(left + (float) (points[i].x * scale), top + (float) (points[i].y * scale));
+                path.close();
+                canvas.drawPath(path, paint);
+                paint.setStyle(Paint.Style.FILL);
+                paint.setTextSize(24);
+                canvas.drawText(node.node.name,
+                        left + (float) (points[0].x * scale),
+                        top + (float) (points[0].y * scale) - 5, paint);
+                paint.setStyle(Paint.Style.STROKE);
+            }
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent event) {
+            if (event.getAction() != MotionEvent.ACTION_UP || match == null
+                    || frameWidth == 0 || frameHeight == 0) return true;
+            double scale = Math.min((double) getWidth() / frameWidth, (double) getHeight() / frameHeight);
+            double left = (getWidth() - frameWidth * scale) / 2;
+            double top = (getHeight() - frameHeight * scale) / 2;
+            Point touch = new Point((event.getX() - left) / scale, (event.getY() - top) / scale);
+            for (LocalMatcher.NodeMatch node : match.nodes) {
+                if (inside(node.corners, touch)) {
+                    openNode.accept(node.node);
+                    break;
+                }
+            }
+            return true;
+        }
+
+        private static boolean inside(Point[] corners, Point touch) {
+            double sign = 0;
+            for (int i = 0; i < corners.length; i++) {
+                Point a = corners[i], b = corners[(i + 1) % corners.length];
+                double cross = (b.x - a.x) * (touch.y - a.y)
+                        - (b.y - a.y) * (touch.x - a.x);
+                if (Math.abs(cross) < 1) continue;
+                if (sign == 0) sign = Math.signum(cross);
+                else if (Math.signum(cross) != sign) return false;
+            }
+            return sign != 0;
         }
     }
 }

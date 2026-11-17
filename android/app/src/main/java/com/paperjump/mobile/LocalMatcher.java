@@ -18,15 +18,27 @@ import java.util.Comparator;
 import java.util.List;
 
 final class LocalMatcher {
+    static final class NodeMatch {
+        final BindingData.Node node;
+        final Point[] corners;
+
+        NodeMatch(BindingData.Node node, Point[] corners) {
+            this.node = node;
+            this.corners = corners;
+        }
+    }
+
     static final class Match {
         final BindingData.Anchor anchor;
         final Point[] corners;
         final int inliers;
+        final List<NodeMatch> nodes;
 
-        Match(BindingData.Anchor anchor, Point[] corners, int inliers) {
+        Match(BindingData.Anchor anchor, Point[] corners, int inliers, List<NodeMatch> nodes) {
             this.anchor = anchor;
             this.corners = corners;
             this.inliers = inliers;
+            this.nodes = nodes;
         }
     }
 
@@ -117,7 +129,16 @@ final class LocalMatcher {
                 if (!convex(corners)) return null;
                 double ratio = area(Arrays.asList(corners)) / (anchor.width * anchor.height);
                 if (ratio < .3 || ratio > 30) return null;
-                return new Match(anchor, corners, inliers);
+                List<NodeMatch> nodes = new ArrayList<>();
+                for (BindingData.Node node : anchor.nodes) {
+                    double[] r = node.region;
+                    nodes.add(new NodeMatch(node, new Point[]{
+                            project(h, new Point(r[0], r[1])),
+                            project(h, new Point(r[2], r[1])),
+                            project(h, new Point(r[2], r[3])),
+                            project(h, new Point(r[0], r[3]))}));
+                }
+                return new Match(anchor, corners, inliers, nodes);
             } finally {
                 src.release(); dst.release(); mask.release(); if (h != null) h.release();
             }
