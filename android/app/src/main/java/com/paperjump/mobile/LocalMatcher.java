@@ -107,7 +107,8 @@ final class LocalMatcher {
                 }
                 if (inliers < 8 || inliers < good.size() * .5
                         || Math.sqrt(error / inliers) > 3) return null;
-                if (area(hull(inlierSource)) / (anchor.width * anchor.height) < .06) return null;
+                double coverage = area(hull(inlierSource)) / (anchor.width * anchor.height);
+                if (coverage < (anchor.natural ? .035 : .06)) return null;
                 Point[] corners = new Point[]{
                         project(h, new Point(0, 0)),
                         project(h, new Point(anchor.width - 1, 0)),
