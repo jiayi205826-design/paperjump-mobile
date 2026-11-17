@@ -51,9 +51,15 @@ final class LocalMatcher {
 
     Match find(Mat gray, List<BindingData.Anchor> anchors) {
         Match fastLocal = findGroup(gray, anchors, false, true, 12);
-        if (strong(fastLocal)) return fastLocal;
         Match fastNatural = findGroup(gray, anchors, true, true, 12);
-        if (strong(fastNatural)) return fastNatural;
+        Match fastBest = fastLocal;
+        Match fastSecond = fastNatural;
+        if (fastBest == null || (fastSecond != null && fastSecond.inliers > fastBest.inliers)) {
+            fastBest = fastNatural;
+            fastSecond = fastLocal;
+        }
+        if (strong(fastBest) && (fastSecond == null
+                || fastBest.inliers - fastSecond.inliers >= 12)) return fastBest;
         Match local = findGroup(gray, anchors, false, false, 4);
         return local != null ? local : findGroup(gray, anchors, true, false, 4);
     }
