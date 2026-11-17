@@ -42,6 +42,8 @@ final class BindingData {
         final int height;
         final Point[] points;
         final Mat descriptors;
+        final Point[] fastPoints;
+        final Mat fastDescriptors;
         final List<Node> nodes;
         final boolean natural;
 
@@ -52,6 +54,16 @@ final class BindingData {
             this.height = height;
             this.points = points;
             this.descriptors = descriptors;
+            fastPoints = new Point[(points.length + 3) / 4];
+            byte[] fastBytes = new byte[fastPoints.length * 32];
+            byte[] allBytes = new byte[points.length * 32];
+            descriptors.get(0, 0, allBytes);
+            for (int i = 0; i < fastPoints.length; i++) {
+                fastPoints[i] = points[i * 4];
+                System.arraycopy(allBytes, i * 4 * 32, fastBytes, i * 32, 32);
+            }
+            fastDescriptors = new Mat(fastPoints.length, 32, CvType.CV_8U);
+            fastDescriptors.put(0, 0, fastBytes);
             this.nodes = nodes;
             this.natural = natural;
         }

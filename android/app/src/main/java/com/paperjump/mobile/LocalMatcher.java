@@ -32,12 +32,15 @@ final class LocalMatcher {
         final BindingData.Anchor anchor;
         final Point[] corners;
         final int inliers;
+        final double inlierRatio;
         final List<NodeMatch> nodes;
 
-        Match(BindingData.Anchor anchor, Point[] corners, int inliers, List<NodeMatch> nodes) {
+        Match(BindingData.Anchor anchor, Point[] corners, int inliers, double inlierRatio,
+              List<NodeMatch> nodes) {
             this.anchor = anchor;
             this.corners = corners;
             this.inliers = inliers;
+            this.inlierRatio = inlierRatio;
             this.nodes = nodes;
         }
     }
@@ -47,11 +50,20 @@ final class LocalMatcher {
     private final BFMatcher matcher = BFMatcher.create(Core.NORM_HAMMING, false);
 
     Match find(Mat gray, List<BindingData.Anchor> anchors) {
-        Match local = findGroup(gray, anchors, false);
-        return local != null ? local : findGroup(gray, anchors, true);
+        Match fastLocal = findGroup(gray, anchors, false, true, 12);
+        if (strong(fastLocal)) return fastLocal;
+        Match fastNatural = findGroup(gray, anchors, true, true, 12);
+        if (strong(fastNatural)) return fastNatural;
+        Match local = findGroup(gray, anchors, false, false, 4);
+        return local != null ? local : findGroup(gray, anchors, true, false, 4);
     }
 
-    private Match findGroup(Mat gray, List<BindingData.Anchor> anchors, boolean natural) {
+    private static boolean strong(Match match) {
+        return match != null && match.inliers >= 30 && match.inlierRatio >= .65;
+    }
+
+    private Match findGroup(Mat gray, List<BindingData.Anchor> anchors, boolean natural,
+                            boolean fast, int minMargin) {
         MatOfKeyPoint queryPoints = new MatOfKeyPoint();
         Mat queryDescriptors = new Mat();
         try {
@@ -63,7 +75,7 @@ final class LocalMatcher {
             Match best = null, second = null;
             for (BindingData.Anchor anchor : anchors) {
                 if (anchor.natural != natural) continue;
-                Match current = match(anchor, query, queryDescriptors);
+                Match current = match(anchor, query, queryDescriptors, fast);
                 if (current == null) continue;
                 if (best == null || current.inliers > best.inliers) {
                     second = best;
@@ -74,7 +86,7 @@ final class LocalMatcher {
             }
             if (best != null && second != null
                     && !best.anchor.pageId.equals(second.anchor.pageId)
-                    && best.inliers - second.inliers < 4) return null;
+                    && best.inliers - second.inliers < minMargin) return null;
             return best;
         } finally {
             queryPoints.release();
@@ -82,10 +94,12 @@ final class LocalMatcher {
         }
     }
 
-    private Match match(BindingData.Anchor anchor, KeyPoint[] query, Mat descriptors) {
+    private Match match(BindingData.Anchor anchor, KeyPoint[] query, Mat descriptors,
+                        boolean fast) {
         List<MatOfDMatch> pairs = new ArrayList<>();
         try {
-            matcher.knnMatch(anchor.descriptors, descriptors, pairs, 2);
+            matcher.knnMatch(fast ? anchor.fastDescriptors : anchor.descriptors,
+                    descriptors, pairs, 2);
             List<DMatch> good = new ArrayList<>();
             for (MatOfDMatch pair : pairs) {
                 DMatch[] candidates = pair.toArray();
@@ -97,7 +111,7 @@ final class LocalMatcher {
             Point[] target = new Point[good.size()];
             for (int i = 0; i < good.size(); i++) {
                 DMatch hit = good.get(i);
-                source[i] = anchor.points[hit.queryIdx];
+                source[i] = (fast ? anchor.fastPoints : anchor.points)[hit.queryIdx];
                 target[i] = query[hit.trainIdx].pt;
             }
             MatOfPoint2f src = new MatOfPoint2f(source);
@@ -138,7 +152,7 @@ final class LocalMatcher {
                             project(h, new Point(r[2], r[3])),
                             project(h, new Point(r[0], r[3]))}));
                 }
-                return new Match(anchor, corners, inliers, nodes);
+                return new Match(anchor, corners, inliers, inliers / (double) good.size(), nodes);
             } finally {
                 src.release(); dst.release(); mask.release(); if (h != null) h.release();
             }

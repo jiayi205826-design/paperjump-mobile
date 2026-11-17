@@ -179,7 +179,10 @@ public final class MainActivity extends ComponentActivity {
                 List<BindingData.Anchor> loaded = BindingData.fetch(key);
                 List<BindingData.Anchor> previous = anchors;
                 anchors = loaded;
-                for (BindingData.Anchor anchor : previous) anchor.descriptors.release();
+                for (BindingData.Anchor anchor : previous) {
+                    anchor.descriptors.release();
+                    anchor.fastDescriptors.release();
+                }
                 runOnUiThread(() -> {
                     pairingStatus.setText("已同步 " + loaded.size() + " 组特征 · 手机地址 "
                             + WifiCameraServer.localAddress());
@@ -342,7 +345,10 @@ public final class MainActivity extends ComponentActivity {
         worker.shutdownNow();
         syncWorker.shutdownNow();
         if (wifiCamera != null) wifiCamera.stop();
-        for (BindingData.Anchor anchor : anchors) anchor.descriptors.release();
+        for (BindingData.Anchor anchor : anchors) {
+            anchor.descriptors.release();
+            anchor.fastDescriptors.release();
+        }
     }
 
     private static final class MatchOverlay extends View {
