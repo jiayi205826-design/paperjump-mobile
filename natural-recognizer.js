@@ -22,7 +22,7 @@ export function loadOpenCv() {
     const timeout = window.setTimeout(() => {
       cvPromise = undefined;
       reject(new Error('识别组件加载超时，请刷新页面后重试'));
-    }, 20000);
+    }, 120000);
     const finish = (callback, value) => {
       window.clearTimeout(timeout);
       callback(value);
@@ -31,8 +31,8 @@ export function loadOpenCv() {
       try {
         let runtime = window.cv;
         if (runtime instanceof Promise) runtime = await runtime;
-        if (runtime?.Mat) return finish(resolve, runtime);
-        runtime.onRuntimeInitialized = () => finish(resolve, runtime);
+        if (runtime?.Mat) { window.cv = runtime; return finish(resolve, runtime); }
+        runtime.onRuntimeInitialized = () => { window.cv = runtime; finish(resolve, runtime); };
       } catch (error) { finish(reject, error); }
     };
     if (window.cv) return ready();

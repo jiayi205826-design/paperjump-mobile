@@ -1,4 +1,4 @@
-import {loadOpenCv} from './natural-recognizer.js?v=3';
+import {loadOpenCv} from './natural-recognizer.js?v=4';
 
 function bytes(value) {
   const raw=atob(value);

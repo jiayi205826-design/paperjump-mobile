@@ -1,4 +1,4 @@
-import {MobileNaturalRecognizer,loadOpenCv} from './natural-recognizer.js?v=3';
+import {MobileNaturalRecognizer,loadOpenCv} from './natural-recognizer.js?v=4';
 import {pairingFromLocation, syncSettings, cachedSnapshot, fetchSnapshot} from './private-sync.js?v=1';
 import {MobileLocalRecognizer} from './mobile-local-recognizer.js?v=1';
 
@@ -33,6 +33,7 @@ let naturalSnapshot = null;
 let localRecognizer = null;
 let pageDimensions = {};
 let localScanBusy = false;
+let localLoadFailed = false;
 let lastLocalScan = 0;
 let lastLocalMatch = 0;
 let fingerNode = '';
@@ -279,7 +280,7 @@ async function frame() {
   canvas.width=video.videoWidth;canvas.height=video.videoHeight;ctx.drawImage(video,0,0,canvas.width,canvas.height);
   if(pageMode==='local'){
     const now=performance.now();
-    if(localRecognizer&&!localScanBusy&&now-lastLocalScan>650){
+    if(localRecognizer&&!localLoadFailed&&!localScanBusy&&now-lastLocalScan>650){
       lastLocalScan=now;
       localScanBusy=true;
       const scale=Math.min(1,960/canvas.width);
@@ -287,6 +288,7 @@ async function frame() {
       scanCanvas.height=Math.round(canvas.height*scale);
       scanContext.drawImage(video,0,0,scanCanvas.width,scanCanvas.height);
       const image=scanContext.getImageData(0,0,scanCanvas.width,scanCanvas.height);
+      if(!window.cv?.Mat)setStatus('首次加载纸面识别组件，摄像头画面已开启，请稍候…');
       localRecognizer.recognize(image).then(found=>{
         if(pageMode!=='local')return;
         if(found){
@@ -299,7 +301,10 @@ async function frame() {
           currentLocated=null;currentTransform=null;renderNodeList(null);
           setStatus('正在寻找已绑定字迹…');
         }
-      }).catch(error=>setStatus(`局部识别失败：${error.message}`))
+      }).catch(error=>{
+        localLoadFailed=true;
+        setStatus(`局部识别失败：${error.message}`);
+      })
         .finally(()=>{localScanBusy=false;});
     }
     let fingertip=cachedFingertip,active=null;
@@ -432,6 +437,7 @@ async function autoNaturalScan() {
 }
 
 async function start() {
+  localLoadFailed=false;
   $('#start').disabled=true;
   $('#start').textContent='正在启动摄像头…';
   try {
@@ -453,6 +459,11 @@ async function start() {
       detector=new window.AR.Detector({dictionaryName:'DICT_4X4_50',maxHammingDistance:1});
     }else if(pageMode==='aruco')throw new Error('ArUco 识别库加载失败，请检查网络');
     frame();
+    if(pageMode==='local'){
+      setStatus('摄像头已开启，首次加载纸面识别组件，请稍候…');
+      await loadOpenCv();
+      setStatus('纸面识别已就绪，正在加载手指识别…');
+    }
     try{
       const {FilesetResolver, HandLandmarker}=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/vision_bundle.mjs');
       const vision=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/wasm');
